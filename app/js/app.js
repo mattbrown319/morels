@@ -278,13 +278,15 @@ async function fetchRegionWeather() {
   }
   renderProbabilityLayer();
 
-  // When user pans the map, fetch new cells on demand
+  // When user pans/zooms the map, fetch new cells and re-render
   map.on("moveend", onMapMove);
+  map.on("zoomend", () => renderProbabilityLayer());
 }
 
 let moveTimeout = null;
+const MAX_CELLS_PER_LOAD = 80; // cap to prevent slowdown on zoom-out
+
 async function onMapMove() {
-  // Debounce — wait 500ms after panning stops
   if (moveTimeout) clearTimeout(moveTimeout);
   moveTimeout = setTimeout(async () => {
     const bounds = map.getBounds();
@@ -301,18 +303,25 @@ async function onMapMove() {
 
     if (needCells.length === 0) return;
 
-    showLoading(`Loading ${needCells.length} new areas...`);
+    // If zoomed way out, sample evenly instead of loading everything
+    let cellsToFetch = needCells;
+    if (needCells.length > MAX_CELLS_PER_LOAD) {
+      const step = Math.ceil(needCells.length / MAX_CELLS_PER_LOAD);
+      cellsToFetch = needCells.filter((_, i) => i % step === 0);
+    }
+
+    showLoading(`Loading ${cellsToFetch.length} areas...`);
     const batchSize = 15;
     const delay = ms => new Promise(r => setTimeout(r, ms));
 
-    for (let i = 0; i < needCells.length; i += batchSize) {
-      const batch = needCells.slice(i, i + batchSize);
+    for (let i = 0; i < cellsToFetch.length; i += batchSize) {
+      const batch = cellsToFetch.slice(i, i + batchSize);
       await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
       renderProbabilityLayer();
       await delay(200);
     }
     hideLoading();
-  }, 500);
+  }, 600);
 }
 
 // ── Probability Scoring ────────────────────────────────────────
@@ -382,49 +391,103 @@ function renderProbabilityLayer() {
   if (probabilityLayer) map.removeLayer(probabilityLayer);
   if (!document.getElementById("layer-probability").checked) return;
 
+  const zoom = map.getZoom();
   const rectangles = [];
 
-  weatherCache.forEach((weather, key) => {
-    const [lat, lon] = key.split(",").map(Number);
-    const score = computeScore(lat, lon);
-    if (!score) return;
+  // At low zoom, merge cells into larger blocks (average scores)
+  // zoom >= 9: show individual 0.1° cells
+  // zoom 7-8: merge to 0.3° blocks
+  // zoom <= 6: merge to 0.5° blocks
+  let mergeRes;
+  if (zoom >= 9) mergeRes = 0.1;
+  else if (zoom >= 7) mergeRes = 0.3;
+  else mergeRes = 0.5;
 
-    const halfRes = 0.05;
-    const bounds = [
-      [lat - halfRes, lon - halfRes],
-      [lat + halfRes, lon + halfRes],
-    ];
+  if (mergeRes > 0.1) {
+    // Aggregate cached cells into larger blocks
+    const blocks = new Map(); // "blockLat,blockLon" -> { scores: [], temps: [], precips: [] }
 
-    const color = scoreToColor(score.total);
+    weatherCache.forEach((weather, key) => {
+      const [lat, lon] = key.split(",").map(Number);
+      const score = computeScore(lat, lon);
+      if (!score) return;
 
-    const rect = L.rectangle(bounds, {
-      color: "transparent",
-      fillColor: color,
-      fillOpacity: 0.45,
-      weight: 0,
+      const bLat = Math.round(lat / mergeRes) * mergeRes;
+      const bLon = Math.round(lon / mergeRes) * mergeRes;
+      const bKey = `${bLat.toFixed(2)},${bLon.toFixed(2)}`;
+
+      if (!blocks.has(bKey)) blocks.set(bKey, { scores: [], temps: [], precips: [] });
+      const b = blocks.get(bKey);
+      b.scores.push(score.total);
+      if (score.soilTemp != null) b.temps.push(score.soilTemp);
+      b.precips.push(score.precip14d);
     });
 
-    const tempF = score.soilTemp != null ? Math.round(score.soilTemp * 9/5 + 32) : "?";
-    const precipIn = (score.precip14d / 25.4).toFixed(1);
+    blocks.forEach((b, bKey) => {
+      const [lat, lon] = bKey.split(",").map(Number);
+      const avgScore = Math.round(b.scores.reduce((a, c) => a + c, 0) / b.scores.length);
+      const avgTemp = b.temps.length > 0 ? b.temps.reduce((a, c) => a + c, 0) / b.temps.length : null;
+      const avgPrecip = b.precips.reduce((a, c) => a + c, 0) / b.precips.length;
 
-    rect.bindPopup(`
-      <div class="cell-popup">
-        <div class="cell-score" style="color:${color}">${score.total}/100</div>
-        <h4>Morel Conditions</h4>
-        <div class="cell-detail">
-          Soil temp: <b>${tempF}°F</b> ${tempF >= 50 && tempF <= 61 ? '(sweet spot!)' : tempF < 50 ? '(still cool)' : '(warm)'}
-        </div>
-        <div class="cell-detail">
-          Rain (14d): <b>${precipIn}"</b> ${score.precip14d >= 25 && score.precip14d <= 50 ? '(good)' : score.precip14d < 25 ? '(dry)' : '(wet)'}
-        </div>
-        <div class="cell-detail">
-          Historical sightings: ${score.density > 0 ? 'Yes' : 'None recorded'}
-        </div>
-      </div>
-    `, { maxWidth: 220 });
+      const halfRes = mergeRes / 2;
+      const color = scoreToColor(avgScore);
 
-    rectangles.push(rect);
-  });
+      const rect = L.rectangle(
+        [[lat - halfRes, lon - halfRes], [lat + halfRes, lon + halfRes]],
+        { color: "transparent", fillColor: color, fillOpacity: 0.4, weight: 0 }
+      );
+
+      const tempF = avgTemp != null ? Math.round(avgTemp * 9/5 + 32) : "?";
+      const precipIn = (avgPrecip / 25.4).toFixed(1);
+      rect.bindPopup(`
+        <div class="cell-popup">
+          <div class="cell-score" style="color:${color}">${avgScore}/100</div>
+          <h4>Area Conditions</h4>
+          <div class="cell-detail">Avg soil temp: <b>${tempF}°F</b></div>
+          <div class="cell-detail">Avg rain (14d): <b>${precipIn}"</b></div>
+          <div class="cell-detail" style="font-style:italic">Zoom in for detail</div>
+        </div>
+      `, { maxWidth: 200 });
+
+      rectangles.push(rect);
+    });
+  } else {
+    // Full resolution — individual 0.1° cells
+    weatherCache.forEach((weather, key) => {
+      const [lat, lon] = key.split(",").map(Number);
+      const score = computeScore(lat, lon);
+      if (!score) return;
+
+      const halfRes = 0.05;
+      const color = scoreToColor(score.total);
+
+      const rect = L.rectangle(
+        [[lat - halfRes, lon - halfRes], [lat + halfRes, lon + halfRes]],
+        { color: "transparent", fillColor: color, fillOpacity: 0.45, weight: 0 }
+      );
+
+      const tempF = score.soilTemp != null ? Math.round(score.soilTemp * 9/5 + 32) : "?";
+      const precipIn = (score.precip14d / 25.4).toFixed(1);
+
+      rect.bindPopup(`
+        <div class="cell-popup">
+          <div class="cell-score" style="color:${color}">${score.total}/100</div>
+          <h4>Morel Conditions</h4>
+          <div class="cell-detail">
+            Soil temp: <b>${tempF}°F</b> ${tempF >= 50 && tempF <= 61 ? '(sweet spot!)' : tempF < 50 ? '(still cool)' : '(warm)'}
+          </div>
+          <div class="cell-detail">
+            Rain (14d): <b>${precipIn}"</b> ${score.precip14d >= 25 && score.precip14d <= 50 ? '(good)' : score.precip14d < 25 ? '(dry)' : '(wet)'}
+          </div>
+          <div class="cell-detail">
+            Historical sightings: ${score.density > 0 ? 'Yes' : 'None recorded'}
+          </div>
+        </div>
+      `, { maxWidth: 220 });
+
+      rectangles.push(rect);
+    });
+  }
 
   probabilityLayer = L.layerGroup(rectangles).addTo(map);
 }
@@ -435,7 +498,23 @@ function loadSightingsLayer() {
 
   if (sightingsLayer) map.removeLayer(sightingsLayer);
 
-  const markers = [];
+  const cluster = L.markerClusterGroup({
+    maxClusterRadius: 40,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    iconCreateFunction: (clust) => {
+      const count = clust.getChildCount();
+      let size, className;
+      if (count >= 20) { size = 40; className = "cluster-large"; }
+      else if (count >= 5) { size = 32; className = "cluster-medium"; }
+      else { size = 26; className = "cluster-small"; }
+      return L.divIcon({
+        html: `<div class="cluster-icon ${className}">${count}</div>`,
+        iconSize: [size, size],
+        className: "",
+      });
+    },
+  });
 
   sightingsData.features.forEach(f => {
     const p = f.properties;
@@ -465,10 +544,11 @@ function loadSightingsLayer() {
     popupHtml += `</div>`;
     marker.bindPopup(popupHtml, { maxWidth: 250 });
 
-    markers.push(marker);
+    cluster.addLayer(marker);
   });
 
-  sightingsLayer = L.layerGroup(markers).addTo(map);
+  sightingsLayer = cluster;
+  map.addLayer(sightingsLayer);
 }
 
 // ── Indicator Species Layer ────────────────────────────────────

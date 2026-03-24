@@ -419,6 +419,40 @@ body {
   box-shadow: 0 1px 4px rgba(0,0,0,0.3);
 }
 
+/* === Sighting clusters === */
+.cluster-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  border: 2px solid rgba(255,255,255,0.6);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
+.cluster-small {
+  background: rgba(232, 168, 56, 0.8);
+  width: 26px; height: 26px;
+}
+
+.cluster-medium {
+  background: rgba(232, 140, 40, 0.85);
+  width: 32px; height: 32px;
+  font-size: 13px;
+}
+
+.cluster-large {
+  background: rgba(220, 100, 30, 0.9);
+  width: 40px; height: 40px;
+  font-size: 14px;
+}
+
+/* Hide default MarkerCluster styles */
+.marker-cluster { background: none !important; }
+.marker-cluster div { background: none !important; }
+
 /* === User location marker === */
 .user-location-marker { background: transparent; border: none; }
 
