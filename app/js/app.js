@@ -33,45 +33,49 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadData();
     initMap();
     initUI();
-    geolocateUser();
-    await fetchWeatherAndRender();
+
+    // Get user location, THEN load data around them
+    const loc = await geolocateUser();
+    userLocation = loc;
+    map.setView([loc.lat, loc.lon], 10);
+    addUserMarker(loc.lat, loc.lon);
+
+    // Load local area first (fast — ~20 cells, 2-3 seconds)
+    await fetchLocalWeather(loc.lat, loc.lon);
     loadSightingsLayer();
     loadIndicatorLayer();
+
+    // Fill in the rest of the region in the background
+    fetchRegionWeather();
   } catch (err) {
     console.error("Init error:", err);
-    document.getElementById("readiness-label").textContent = "Error loading data";
+    document.getElementById("readiness-label").textContent = "Error loading — pull to refresh";
   }
 });
 
 // ── Geolocation ────────────────────────────────────────────────
 function geolocateUser() {
-  // Geolocation requires HTTPS on mobile browsers.
-  // On plain HTTP (dev), we fall back to the default center.
-  const isSecure = location.protocol === "https:" || location.hostname === "localhost";
+  return new Promise((resolve) => {
+    const fallback = { lat: appConfig.default_center[0], lon: appConfig.default_center[1] };
+    const isSecure = location.protocol === "https:" || location.hostname === "localhost";
 
-  if (!isSecure || !navigator.geolocation) {
-    console.log("Geolocation unavailable (requires HTTPS). Using default center.");
-    userLocation = { lat: appConfig.default_center[0], lon: appConfig.default_center[1] };
-    addUserMarker(userLocation.lat, userLocation.lon);
-    return;
-  }
+    if (!isSecure || !navigator.geolocation) {
+      console.log("Geolocation unavailable (requires HTTPS). Using default.");
+      resolve(fallback);
+      return;
+    }
 
-  document.getElementById("readiness-label").textContent = "Finding your location...";
+    document.getElementById("readiness-label").textContent = "Finding your location...";
 
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      const { latitude, longitude } = pos.coords;
-      userLocation = { lat: latitude, lon: longitude };
-      map.setView([latitude, longitude], 10);
-      addUserMarker(latitude, longitude);
-    },
-    (err) => {
-      console.log("Geolocation denied, using default center");
-      userLocation = { lat: appConfig.default_center[0], lon: appConfig.default_center[1] };
-      addUserMarker(userLocation.lat, userLocation.lon);
-    },
-    { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
-  );
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      () => {
+        console.log("Geolocation denied, using default");
+        resolve(fallback);
+      },
+      { enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }
+    );
+  });
 }
 
 function addUserMarker(lat, lon) {
@@ -91,7 +95,7 @@ async function loadData() {
   const [config, density, sightings, harvest, indicators] = await Promise.all([
     fetch("data/app-config.json").then(r => r.json()),
     fetch("data/density-grid.json").then(r => r.json()),
-    fetch("data/sightings-ma.geojson").then(r => r.json()),
+    fetch("data/sightings-ne.geojson").then(r => r.json()),
     fetch("data/honorable-harvest.json").then(r => r.json()),
     fetch("data/indicator-taxa.json").then(r => r.json()),
   ]);
@@ -210,71 +214,105 @@ async function fetchWeatherForCell(lat, lon) {
   return result;
 }
 
-async function fetchWeatherAndRender() {
-  const gridUrl = `data/grid-ma.json`;
-  const gridCells = await fetch(gridUrl).then(r => r.json());
+// All grid cells for the region (loaded once)
+let allGridCells = [];
 
-  // Fetch in batches to avoid hammering the API
+async function fetchLocalWeather(lat, lon) {
+  const batchSize = 15;
+  const delay = ms => new Promise(r => setTimeout(r, ms));
+
+  // Load the full region grid
+  const gridUrl = `data/grid-ne.json`;
+  allGridCells = await fetch(gridUrl).then(r => r.json());
+
+  // 1. Fetch the user's exact cell first for the readiness gauge
+  showLoading("Checking soil temperature near you...");
+  const userWeather = await fetchWeatherForCell(
+    Math.round(lat * 10) / 10,
+    Math.round(lon * 10) / 10
+  );
+  updateReadinessGauge(userWeather);
+  document.getElementById("legend").classList.remove("hidden");
+
+  // 2. Fetch a ~50km radius around the user (~25 cells) for instant local view
+  const localRadius = 0.5; // degrees (~55km)
+  const localCells = allGridCells.filter(c =>
+    Math.abs(c.lat - lat) <= localRadius && Math.abs(c.lon - lon) <= localRadius
+  );
+
+  showLoading(`Loading your area... 0/${localCells.length}`);
+
+  for (let i = 0; i < localCells.length; i += batchSize) {
+    const batch = localCells.slice(i, i + batchSize);
+    await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
+    showLoading(`Loading your area... ${Math.min(i + batchSize, localCells.length)}/${localCells.length}`);
+    renderProbabilityLayer();
+    if (i + batchSize < localCells.length) await delay(150);
+  }
+
+  hideLoading();
+}
+
+async function fetchRegionWeather() {
+  // Fill in the rest of the visible grid in the background (no loading banner)
   const batchSize = 20;
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
-  // Fetch weather for the user's location (or default) for the readiness gauge
-  showLoading("Checking soil temperature...");
-  const loc = userLocation || { lat: appConfig.default_center[0], lon: appConfig.default_center[1] };
-  const userWeather = await fetchWeatherForCell(
-    Math.round(loc.lat * 10) / 10,
-    Math.round(loc.lon * 10) / 10
-  );
-  updateReadinessGauge(userWeather);
-
-  // Show legend
-  document.getElementById("legend").classList.remove("hidden");
-
-  // Fetch visible grid cells for the probability layer
   const visibleBounds = map.getBounds();
-  const visibleCells = gridCells.filter(c =>
-    c.lat >= visibleBounds.getSouth() - 0.2 &&
-    c.lat <= visibleBounds.getNorth() + 0.2 &&
-    c.lon >= visibleBounds.getWest() - 0.2 &&
-    c.lon <= visibleBounds.getEast() + 0.2
-  );
+  const visibleCells = allGridCells.filter(c => {
+    const key = `${c.lat},${c.lon}`;
+    if (weatherCache.has(key)) return false; // already fetched
+    return (
+      c.lat >= visibleBounds.getSouth() - 0.3 &&
+      c.lat <= visibleBounds.getNorth() + 0.3 &&
+      c.lon >= visibleBounds.getWest() - 0.3 &&
+      c.lon <= visibleBounds.getEast() + 0.3
+    );
+  });
 
-  const totalCells = visibleCells.length;
-
-  // Sample ~100 cells for fast initial render
-  const sampleStep = Math.max(1, Math.floor(totalCells / 100));
-  const sampledCells = visibleCells.filter((_, i) => i % sampleStep === 0);
-  let completed = 0;
-
-  showLoading(`Loading conditions... 0/${totalCells} areas`);
-
-  for (let i = 0; i < sampledCells.length; i += batchSize) {
-    const batch = sampledCells.slice(i, i + batchSize);
+  for (let i = 0; i < visibleCells.length; i += batchSize) {
+    const batch = visibleCells.slice(i, i + batchSize);
     await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
-    completed += batch.length;
-    showLoading(`Loading conditions... ${completed}/${totalCells} areas`);
-    renderProbabilityLayer();
-
-    if (i + batchSize < sampledCells.length) {
-      await delay(200);
-    }
-  }
-
-  // Fill in remaining cells in the background
-  const remaining = visibleCells.filter((_, i) => i % sampleStep !== 0);
-  for (let i = 0; i < remaining.length; i += batchSize) {
-    const batch = remaining.slice(i, i + batchSize);
-    await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
-    completed += batch.length;
-
-    if ((i / batchSize) % 3 === 0) {
-      showLoading(`Loading conditions... ${completed}/${totalCells} areas`);
-      renderProbabilityLayer();
-    }
+    if ((i / batchSize) % 2 === 0) renderProbabilityLayer();
     await delay(300);
   }
   renderProbabilityLayer();
-  hideLoading();
+
+  // When user pans the map, fetch new cells on demand
+  map.on("moveend", onMapMove);
+}
+
+let moveTimeout = null;
+async function onMapMove() {
+  // Debounce — wait 500ms after panning stops
+  if (moveTimeout) clearTimeout(moveTimeout);
+  moveTimeout = setTimeout(async () => {
+    const bounds = map.getBounds();
+    const needCells = allGridCells.filter(c => {
+      const key = `${c.lat},${c.lon}`;
+      if (weatherCache.has(key)) return false;
+      return (
+        c.lat >= bounds.getSouth() - 0.1 &&
+        c.lat <= bounds.getNorth() + 0.1 &&
+        c.lon >= bounds.getWest() - 0.1 &&
+        c.lon <= bounds.getEast() + 0.1
+      );
+    });
+
+    if (needCells.length === 0) return;
+
+    showLoading(`Loading ${needCells.length} new areas...`);
+    const batchSize = 15;
+    const delay = ms => new Promise(r => setTimeout(r, ms));
+
+    for (let i = 0; i < needCells.length; i += batchSize) {
+      const batch = needCells.slice(i, i + batchSize);
+      await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
+      renderProbabilityLayer();
+      await delay(200);
+    }
+    hideLoading();
+  }, 500);
 }
 
 // ── Probability Scoring ────────────────────────────────────────
