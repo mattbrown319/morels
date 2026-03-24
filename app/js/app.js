@@ -75,14 +75,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("region-select").value = regionKey;
     await loadRegionData(regionKey);
 
-    // Load local area first (fast)
-    await fetchLocalWeather(loc.lat, loc.lon);
+    // Load everything in parallel — don't let one failure block the rest
     loadRecentMorelLayer();
     loadSightingsLayer();
     loadIndicatorLayer();
 
-    // Fill in the rest in the background
-    fetchRegionWeather();
+    // Weather is nice-to-have, not a blocker
+    fetchLocalWeather(loc.lat, loc.lon).then(() => {
+      fetchRegionWeather();
+    }).catch(err => {
+      console.warn("Weather loading failed:", err);
+      hideLoading();
+      document.getElementById("readiness-detail").textContent =
+        "Weather data temporarily unavailable — try again shortly";
+    });
   } catch (err) {
     console.error("Init error:", err);
     document.getElementById("readiness-label").textContent = "Error loading — pull to refresh";
@@ -201,8 +207,15 @@ async function fetchWeatherForCell(lat, lon) {
     `&hourly=soil_temperature_6cm&daily=precipitation_sum` +
     `&past_days=14&forecast_days=7&timezone=auto`;
 
-  const resp = await fetch(url);
-  const data = await resp.json();
+  let data;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    data = await resp.json();
+  } catch (err) {
+    console.warn(`Weather fetch failed for ${lat},${lon}:`, err.message);
+    return null;
+  }
 
   // Current soil temp: latest non-null hourly value
   const soilTemps = (data.hourly?.soil_temperature_6cm || []).filter(v => v != null);
@@ -286,8 +299,15 @@ async function fetchLocalWeather(lat, lon) {
     Math.round(lat * 10) / 10,
     Math.round(lon * 10) / 10
   );
-  updateReadinessGauge(userWeather);
-  document.getElementById("legend").classList.remove("hidden");
+  if (userWeather) {
+    updateReadinessGauge(userWeather);
+    document.getElementById("legend").classList.remove("hidden");
+  } else {
+    document.getElementById("readiness-label").innerHTML =
+      "🟠 Weather data loading slowly — showing sightings";
+    document.getElementById("readiness-detail").textContent =
+      "Soil temp data may be temporarily unavailable";
+  }
 
   // 2. Progressive passes — each renders at its own resolution
   const passes = [
