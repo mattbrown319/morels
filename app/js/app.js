@@ -309,20 +309,21 @@ async function fetchLocalWeather(lat, lon) {
       }
     }
 
-    // Set render resolution to this pass's block size
-    forceRenderRes = pass.res;
-
-    // Fetch in batches
+    // Fetch all cells for this pass
     for (let i = 0; i < cells.length; i += pass.batch) {
       const batch = cells.slice(i, i + pass.batch);
       await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
-      renderProbabilityLayer();
       if (i + pass.batch < cells.length) await delay(100);
     }
+
+    // Render this pass as one layer at its block size
+    forceRenderRes = pass.res;
+    renderProbabilityLayer();
   }
 
-  // Switch to zoom-based rendering for normal use
+  // Done — clean up stacked layers and do one final clean render
   forceRenderRes = null;
+  clearProbabilityLayers();
   renderProbabilityLayer();
   hideLoading();
 }
@@ -461,9 +462,29 @@ function scoreToColor(score) {
 }
 
 // ── Probability Layer ──────────────────────────────────────────
-function renderProbabilityLayer() {
+// During progressive loading, we ADD layers on top instead of replacing.
+// Each finer pass covers the coarser blocks underneath.
+let probabilityLayers = []; // stack of layers during progressive load
+
+function clearProbabilityLayers() {
+  probabilityLayers.forEach(l => map.removeLayer(l));
+  probabilityLayers = [];
   if (probabilityLayer) map.removeLayer(probabilityLayer);
-  if (!document.getElementById("layer-probability").checked) return;
+  probabilityLayer = null;
+}
+
+function renderProbabilityLayer() {
+  if (!document.getElementById("layer-probability").checked) {
+    clearProbabilityLayers();
+    return;
+  }
+
+  // During progressive loading: add a new layer on top (don't remove old ones)
+  // After loading (forceRenderRes === null): replace everything with one clean layer
+  if (!forceRenderRes) {
+    // Final render or user interaction — clean slate
+    clearProbabilityLayers();
+  }
 
   const zoom = map.getZoom();
   const rectangles = [];
@@ -568,7 +589,15 @@ function renderProbabilityLayer() {
     });
   }
 
-  probabilityLayer = L.layerGroup(rectangles).addTo(map);
+  const newLayer = L.layerGroup(rectangles).addTo(map);
+
+  if (forceRenderRes) {
+    // Progressive loading — stack layers, finer ones cover coarser
+    probabilityLayers.push(newLayer);
+  } else {
+    // Final render — this is the only layer
+    probabilityLayer = newLayer;
+  }
 }
 
 // ── Sightings Layer ────────────────────────────────────────────
