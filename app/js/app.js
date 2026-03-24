@@ -217,16 +217,21 @@ async function fetchWeatherForCell(lat, lon) {
 // All grid cells for the region (loaded once)
 let allGridCells = [];
 
+/**
+ * Progressive refinement loading:
+ * Pass 1: ~6 cells at 1.0° resolution  → instant (<1s)
+ * Pass 2: ~25 cells at 0.5° resolution → fast (~2s)
+ * Pass 3: ~100 cells at 0.2° resolution → fills in (~5s)
+ * Pass 4: full 0.1° resolution nearby   → background
+ */
 async function fetchLocalWeather(lat, lon) {
-  const batchSize = 15;
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
   // Load the full region grid
-  const gridUrl = `data/grid-ne.json`;
-  allGridCells = await fetch(gridUrl).then(r => r.json());
+  allGridCells = await fetch("data/grid-ne.json").then(r => r.json());
 
-  // 1. Fetch the user's exact cell first for the readiness gauge
-  showLoading("Checking soil temperature near you...");
+  // 1. Readiness gauge — single cell, instant
+  showLoading("Checking conditions...");
   const userWeather = await fetchWeatherForCell(
     Math.round(lat * 10) / 10,
     Math.round(lon * 10) / 10
@@ -234,34 +239,51 @@ async function fetchLocalWeather(lat, lon) {
   updateReadinessGauge(userWeather);
   document.getElementById("legend").classList.remove("hidden");
 
-  // 2. Fetch a ~50km radius around the user (~25 cells) for instant local view
-  const localRadius = 0.5; // degrees (~55km)
-  const localCells = allGridCells.filter(c =>
-    Math.abs(c.lat - lat) <= localRadius && Math.abs(c.lon - lon) <= localRadius
-  );
+  // 2. Progressive passes — each one fills in more detail
+  const passes = [
+    { res: 1.0, radius: 3.0, batch: 10, label: null },          // ~6 cells, <1s
+    { res: 0.5, radius: 2.0, batch: 15, label: null },           // ~20 cells, ~1s
+    { res: 0.2, radius: 1.5, batch: 15, label: "Refining..." },  // ~80 cells, ~3s
+    { res: 0.1, radius: 0.8, batch: 15, label: "Details..." },   // local fine, ~3s
+  ];
 
-  showLoading(`Loading your area... 0/${localCells.length}`);
+  for (const pass of passes) {
+    if (pass.label) showLoading(pass.label);
 
-  for (let i = 0; i < localCells.length; i += batchSize) {
-    const batch = localCells.slice(i, i + batchSize);
-    await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
-    showLoading(`Loading your area... ${Math.min(i + batchSize, localCells.length)}/${localCells.length}`);
-    renderProbabilityLayer();
-    if (i + batchSize < localCells.length) await delay(150);
+    // Generate sample points at this resolution within radius
+    const cells = [];
+    for (let clat = lat - pass.radius; clat <= lat + pass.radius; clat += pass.res) {
+      for (let clon = lon - pass.radius; clon <= lon + pass.radius; clon += pass.res) {
+        const rlat = Math.round(clat * 10) / 10;
+        const rlon = Math.round(clon * 10) / 10;
+        const key = `${rlat},${rlon}`;
+        if (!weatherCache.has(key)) {
+          cells.push({ lat: rlat, lon: rlon });
+        }
+      }
+    }
+
+    // Fetch in batches
+    for (let i = 0; i < cells.length; i += pass.batch) {
+      const batch = cells.slice(i, i + pass.batch);
+      await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
+      renderProbabilityLayer();
+      if (i + pass.batch < cells.length) await delay(100);
+    }
   }
 
   hideLoading();
 }
 
 async function fetchRegionWeather() {
-  // Fill in the rest of the visible grid in the background (no loading banner)
+  // Background: fill in remaining visible cells at full resolution
   const batchSize = 20;
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
   const visibleBounds = map.getBounds();
   const visibleCells = allGridCells.filter(c => {
     const key = `${c.lat},${c.lon}`;
-    if (weatherCache.has(key)) return false; // already fetched
+    if (weatherCache.has(key)) return false;
     return (
       c.lat >= visibleBounds.getSouth() - 0.3 &&
       c.lat <= visibleBounds.getNorth() + 0.3 &&
@@ -278,7 +300,7 @@ async function fetchRegionWeather() {
   }
   renderProbabilityLayer();
 
-  // When user pans/zooms the map, fetch new cells and re-render
+  // React to pans and zooms
   map.on("moveend", onMapMove);
   map.on("zoomend", () => renderProbabilityLayer());
 }
