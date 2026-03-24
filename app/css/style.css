@@ -223,6 +223,17 @@ body {
   transform: scale(1.2);
 }
 
+#region-select {
+  width: 100%;
+  padding: 8px;
+  margin-top: 8px;
+  background: rgba(255,255,255,0.08);
+  color: var(--color-text);
+  border: 1px solid #555;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
 #layer-panel-close {
   margin-top: 16px;
   text-align: center;

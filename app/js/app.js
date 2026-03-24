@@ -27,25 +27,59 @@ let userLocation = null;
 const weatherCache = new Map();
 const CACHE_TTL = 3 * 60 * 60 * 1000; // 3 hours
 
+// ── Region Definitions ─────────────────────────────────────────
+const REGIONS = {
+  ne: {
+    name: "New England",
+    bounds: { latMin: 41.1, latMax: 47.5, lonMin: -73.8, lonMax: -66.9 },
+    center: [42.28, -71.42],
+    grid: "data/grid-ne.json",
+    sightings: "data/sightings-ne.geojson",
+  },
+  mi: {
+    name: "Great Lakes",
+    bounds: { latMin: 41.7, latMax: 47.5, lonMin: -90.5, lonMax: -82.4 },
+    center: [44.3, -85.6],
+    grid: "data/grid-mi.json",
+    sightings: "data/sightings-mi.geojson",
+  },
+};
+
+let activeRegion = null;
+
+function detectRegion(lat, lon) {
+  for (const [key, region] of Object.entries(REGIONS)) {
+    const b = region.bounds;
+    if (lat >= b.latMin && lat <= b.latMax && lon >= b.lonMin && lon <= b.lonMax) {
+      return key;
+    }
+  }
+  return "ne"; // default
+}
+
 // ── Init ───────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", async () => {
   try {
-    await loadData();
+    await loadBaseData();
     initMap();
     initUI();
 
-    // Get user location, THEN load data around them
+    // Get user location, detect their region, load region data
     const loc = await geolocateUser();
     userLocation = loc;
     map.setView([loc.lat, loc.lon], 10);
     addUserMarker(loc.lat, loc.lon);
 
-    // Load local area first (fast — ~20 cells, 2-3 seconds)
+    const regionKey = detectRegion(loc.lat, loc.lon);
+    document.getElementById("region-select").value = regionKey;
+    await loadRegionData(regionKey);
+
+    // Load local area first (fast)
     await fetchLocalWeather(loc.lat, loc.lon);
     loadSightingsLayer();
     loadIndicatorLayer();
 
-    // Fill in the rest of the region in the background
+    // Fill in the rest in the background
     fetchRegionWeather();
   } catch (err) {
     console.error("Init error:", err);
@@ -91,20 +125,30 @@ function addUserMarker(lat, lon) {
 }
 
 // ── Data Loading ───────────────────────────────────────────────
-async function loadData() {
-  const [config, density, sightings, harvest, indicators] = await Promise.all([
+async function loadBaseData() {
+  // Load config and shared data (not region-specific)
+  const [config, density, harvest, indicators] = await Promise.all([
     fetch("data/app-config.json").then(r => r.json()),
     fetch("data/density-grid.json").then(r => r.json()),
-    fetch("data/sightings-ne.geojson").then(r => r.json()),
     fetch("data/honorable-harvest.json").then(r => r.json()),
     fetch("data/indicator-taxa.json").then(r => r.json()),
   ]);
 
   appConfig = config;
   densityGrid = density;
-  sightingsData = sightings;
   harvestData = harvest;
   indicatorTaxa = indicators;
+}
+
+async function loadRegionData(regionKey) {
+  const region = REGIONS[regionKey];
+  if (!region) return;
+
+  activeRegion = region;
+  console.log(`Loading region: ${region.name}`);
+
+  // Load region-specific sightings
+  sightingsData = await fetch(region.sightings).then(r => r.json());
 }
 
 // ── Map Init ───────────────────────────────────────────────────
@@ -227,8 +271,9 @@ let allGridCells = [];
 async function fetchLocalWeather(lat, lon) {
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
-  // Load the full region grid
-  allGridCells = await fetch("data/grid-ne.json").then(r => r.json());
+  // Load the grid for the active region
+  const gridUrl = activeRegion ? activeRegion.grid : "data/grid-ne.json";
+  allGridCells = await fetch(gridUrl).then(r => r.json());
 
   // 1. Readiness gauge — single cell, instant
   showLoading("Checking conditions...");
@@ -880,6 +925,29 @@ function initUI() {
   });
   document.getElementById("btn-close-layers").addEventListener("click", () => {
     document.getElementById("layer-panel").classList.add("hidden");
+  });
+
+  // Region switcher
+  document.getElementById("region-select").addEventListener("change", async (e) => {
+    const regionKey = e.target.value;
+    document.getElementById("layer-panel").classList.add("hidden");
+
+    // Clear existing layers
+    weatherCache.clear();
+    if (probabilityLayer) map.removeLayer(probabilityLayer);
+    if (sightingsLayer) map.removeLayer(sightingsLayer);
+    if (indicatorLayer) map.removeLayer(indicatorLayer);
+    if (publicLandLayer) map.removeLayer(publicLandLayer);
+
+    // Load new region
+    await loadRegionData(regionKey);
+    const region = REGIONS[regionKey];
+    map.setView(region.center, 7);
+
+    await fetchLocalWeather(region.center[0], region.center[1]);
+    loadSightingsLayer();
+    loadIndicatorLayer();
+    fetchRegionWeather();
   });
 
   // Layer toggles
