@@ -36,6 +36,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     geolocateUser();
     await fetchWeatherAndRender();
     loadSightingsLayer();
+    loadIndicatorLayer();
   } catch (err) {
     console.error("Init error:", err);
     document.getElementById("readiness-label").textContent = "Error loading data";
@@ -127,6 +128,17 @@ function initMap() {
   L.control.zoom({ position: "topright" }).addTo(map);
 }
 
+// ── Loading State ──────────────────────────────────────────────
+function showLoading(text) {
+  const banner = document.getElementById("loading-banner");
+  document.getElementById("loading-text").textContent = text;
+  banner.classList.remove("hidden");
+}
+
+function hideLoading() {
+  document.getElementById("loading-banner").classList.add("hidden");
+}
+
 // ── Weather Fetching ───────────────────────────────────────────
 async function fetchWeatherForCell(lat, lon) {
   const key = `${lat},${lon}`;
@@ -207,6 +219,7 @@ async function fetchWeatherAndRender() {
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
   // Fetch weather for the user's location (or default) for the readiness gauge
+  showLoading("Checking soil temperature...");
   const loc = userLocation || { lat: appConfig.default_center[0], lon: appConfig.default_center[1] };
   const userWeather = await fetchWeatherForCell(
     Math.round(loc.lat * 10) / 10,
@@ -217,11 +230,7 @@ async function fetchWeatherAndRender() {
   // Show legend
   document.getElementById("legend").classList.remove("hidden");
 
-  // Then fetch all grid cells for the probability layer
-  let fetched = 0;
-  const total = gridCells.length;
-
-  // Subsample for initial load — every other cell for speed
+  // Fetch visible grid cells for the probability layer
   const visibleBounds = map.getBounds();
   const visibleCells = gridCells.filter(c =>
     c.lat >= visibleBounds.getSouth() - 0.2 &&
@@ -230,16 +239,20 @@ async function fetchWeatherAndRender() {
     c.lon <= visibleBounds.getEast() + 0.2
   );
 
+  const totalCells = visibleCells.length;
+
   // Sample ~100 cells for fast initial render
-  const sampleStep = Math.max(1, Math.floor(visibleCells.length / 100));
+  const sampleStep = Math.max(1, Math.floor(totalCells / 100));
   const sampledCells = visibleCells.filter((_, i) => i % sampleStep === 0);
+  let completed = 0;
+
+  showLoading(`Loading conditions... 0/${totalCells} areas`);
 
   for (let i = 0; i < sampledCells.length; i += batchSize) {
     const batch = sampledCells.slice(i, i + batchSize);
     await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
-    fetched += batch.length;
-
-    // Render after each batch
+    completed += batch.length;
+    showLoading(`Loading conditions... ${completed}/${totalCells} areas`);
     renderProbabilityLayer();
 
     if (i + batchSize < sampledCells.length) {
@@ -252,10 +265,16 @@ async function fetchWeatherAndRender() {
   for (let i = 0; i < remaining.length; i += batchSize) {
     const batch = remaining.slice(i, i + batchSize);
     await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
-    if ((i / batchSize) % 3 === 0) renderProbabilityLayer();
+    completed += batch.length;
+
+    if ((i / batchSize) % 3 === 0) {
+      showLoading(`Loading conditions... ${completed}/${totalCells} areas`);
+      renderProbabilityLayer();
+    }
     await delay(300);
   }
   renderProbabilityLayer();
+  hideLoading();
 }
 
 // ── Probability Scoring ────────────────────────────────────────
@@ -419,6 +438,7 @@ async function loadIndicatorLayer() {
   if (indicatorLayer) map.removeLayer(indicatorLayer);
   if (!document.getElementById("layer-indicators").checked) return;
 
+  showLoading("Finding indicator species nearby...");
   const center = map.getCenter();
   const markers = [];
 
@@ -464,6 +484,7 @@ async function loadIndicatorLayer() {
   }
 
   indicatorLayer = L.layerGroup(markers).addTo(map);
+  hideLoading();
 }
 
 // ── Public Land Layer ──────────────────────────────────────────
@@ -471,6 +492,7 @@ async function loadPublicLandLayer() {
   if (publicLandLayer) map.removeLayer(publicLandLayer);
   if (!document.getElementById("layer-public-land").checked) return;
 
+  showLoading("Loading public lands...");
   const bounds = map.getBounds();
   const envelope = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
 
@@ -506,6 +528,7 @@ async function loadPublicLandLayer() {
   } catch (err) {
     console.warn("Failed to load public land:", err);
   }
+  hideLoading();
 }
 
 // ── Forest Cover Layer (NLCD WMS) ──────────────────────────────

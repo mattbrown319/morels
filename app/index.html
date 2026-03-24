@@ -34,6 +34,12 @@
     <div id="readiness-stats"></div>
   </div>
 
+  <!-- Loading banner -->
+  <div id="loading-banner" class="hidden">
+    <div id="loading-spinner"></div>
+    <span id="loading-text">Loading conditions...</span>
+  </div>
+
   <!-- Map -->
   <div id="map"></div>
 
@@ -59,7 +65,7 @@
     <h3>Map Layers</h3>
     <label><input type="checkbox" id="layer-probability" checked> Morel Probability</label>
     <label><input type="checkbox" id="layer-sightings" checked> Historical Sightings</label>
-    <label><input type="checkbox" id="layer-indicators"> Indicator Species (live)</label>
+    <label><input type="checkbox" id="layer-indicators" checked> Indicator Species (live)</label>
     <label><input type="checkbox" id="layer-public-land"> Public Land</label>
     <label><input type="checkbox" id="layer-forest"> Forest Cover</label>
     <div id="layer-panel-close">
