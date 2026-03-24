@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# API caches (regenerable, large)
+data/weather_cache.json
+data/ecoregion_cache.json
+data/cospecies_cache.json
+data/soil_cache.json
+data/elevation_grid_cache.json
+data/elevation_cache.csv

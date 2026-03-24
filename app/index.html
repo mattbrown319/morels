@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Morel Conditions</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Leaflet Heat -->
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+
+  <!-- App styles -->
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- Favicon — morel emoji -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍄</text></svg>">
+</head>
+<body>
+
+  <!-- Readiness Gauge (top bar) -->
+  <div id="readiness-bar">
+    <div id="readiness-content">
+      <div id="readiness-label">Checking conditions...</div>
+      <div id="readiness-detail"></div>
+    </div>
+    <button id="readiness-expand" aria-label="More info">&#9662;</button>
+  </div>
+
+  <!-- Expanded readiness panel -->
+  <div id="readiness-panel" class="hidden">
+    <div id="readiness-stats"></div>
+  </div>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Layer controls (floating) -->
+  <div id="layer-controls">
+    <button id="btn-layers" aria-label="Layers" title="Map layers">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+        <polyline points="2 17 12 22 22 17"></polyline>
+        <polyline points="2 12 12 17 22 12"></polyline>
+      </svg>
+    </button>
+    <button id="btn-locate" aria-label="My location" title="My location">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M12 2v4M12 18v4M2 12h4M18 12h4"></path>
+      </svg>
+    </button>
+  </div>
+
+  <!-- Layer panel -->
+  <div id="layer-panel" class="hidden">
+    <h3>Map Layers</h3>
+    <label><input type="checkbox" id="layer-probability" checked> Morel Probability</label>
+    <label><input type="checkbox" id="layer-sightings" checked> Historical Sightings</label>
+    <label><input type="checkbox" id="layer-indicators"> Indicator Species (live)</label>
+    <label><input type="checkbox" id="layer-public-land"> Public Land</label>
+    <label><input type="checkbox" id="layer-forest"> Forest Cover</label>
+    <div id="layer-panel-close">
+      <button id="btn-close-layers">Done</button>
+    </div>
+  </div>
+
+  <!-- Honorable Harvest bar (bottom) -->
+  <div id="harvest-bar" role="button" tabindex="0" aria-label="Honorable Harvest guidelines">
+    <span id="harvest-teaser">The Honorable Harvest: Take only what you need</span>
+  </div>
+
+  <!-- Honorable Harvest full panel -->
+  <div id="harvest-panel" class="hidden">
+    <div id="harvest-panel-inner">
+      <h2>The Honorable Harvest</h2>
+      <p id="harvest-attribution"></p>
+      <ul id="harvest-principles"></ul>
+      <h3>Foraging Tips</h3>
+      <ul id="harvest-tips"></ul>
+      <button id="btn-close-harvest">Close</button>
+    </div>
+  </div>
+
+  <!-- Legend (for probability layer) -->
+  <div id="legend" class="hidden">
+    <div class="legend-title">Morel Conditions</div>
+    <div class="legend-row"><span class="swatch" style="background:#1a9850"></span> Prime</div>
+    <div class="legend-row"><span class="swatch" style="background:#91cf60"></span> Good</div>
+    <div class="legend-row"><span class="swatch" style="background:#fee08b"></span> Warming Up</div>
+    <div class="legend-row"><span class="swatch" style="background:#fc8d59"></span> Too Cool</div>
+    <div class="legend-row"><span class="swatch" style="background:#d73027"></span> Not Yet</div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

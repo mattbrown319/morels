@@ -1,0 +1,82 @@
+[
+  {
+    "taxon_id": 60714,
+    "name": "Alliaria petiolata",
+    "common_name": "Garlic Mustard",
+    "why": "Top co-occurring species in our data. Thrives in same moist deciduous habitat as morels.",
+    "color": "#4CAF50",
+    "icon": "leaf"
+  },
+  {
+    "taxon_id": 56955,
+    "name": "Podophyllum peltatum",
+    "common_name": "Mayapple",
+    "why": "Classic morel indicator. When mayapple leaves unfurl, morels are fruiting.",
+    "color": "#8BC34A",
+    "icon": "leaf"
+  },
+  {
+    "taxon_id": 56077,
+    "name": "Erythronium americanum",
+    "common_name": "Yellow Trout Lily",
+    "why": "Spring ephemeral that blooms during morel season in deciduous forests.",
+    "color": "#FFEB3B",
+    "icon": "flower"
+  },
+  {
+    "taxon_id": 47585,
+    "name": "Sanguinaria canadensis",
+    "common_name": "Bloodroot",
+    "why": "Early spring bloomer in rich deciduous woods \u2014 same habitat as morels.",
+    "color": "#F5F5F5",
+    "icon": "flower"
+  },
+  {
+    "taxon_id": 49409,
+    "name": "Mertensia virginica",
+    "common_name": "Virginia Bluebells",
+    "why": "Blooms in floodplain forests during peak morel window.",
+    "color": "#2196F3",
+    "icon": "flower"
+  },
+  {
+    "taxon_id": 49968,
+    "name": "Claytonia virginica",
+    "common_name": "Spring Beauty",
+    "why": "Carpets forest floors right as morels start appearing.",
+    "color": "#E91E63",
+    "icon": "flower"
+  },
+  {
+    "taxon_id": 47599,
+    "name": "Trillium",
+    "common_name": "Trillium",
+    "why": "Traditional indicator \u2014 'when trillium blooms, look for morels.'",
+    "color": "#9C27B0",
+    "icon": "flower"
+  },
+  {
+    "taxon_id": 50310,
+    "name": "Dicentra cucullaria",
+    "common_name": "Dutchman's Breeches",
+    "why": "Early spring ephemeral in rich woods. Blooms just before peak morel time.",
+    "color": "#FAFAFA",
+    "icon": "flower"
+  },
+  {
+    "taxon_id": 77250,
+    "name": "Syringa vulgaris",
+    "common_name": "Common Lilac",
+    "why": "Phenological benchmark \u2014 lilac bloom correlates with morel timing across regions.",
+    "color": "#CE93D8",
+    "icon": "flower"
+  },
+  {
+    "taxon_id": 48978,
+    "name": "Taraxacum officinale",
+    "common_name": "Dandelion",
+    "why": "When dandelions are blooming, soil temps are in the morel range.",
+    "color": "#FFC107",
+    "icon": "flower"
+  }
+]

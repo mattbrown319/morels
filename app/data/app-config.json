@@ -1,0 +1,52 @@
+{
+  "regions": {
+    "ma": {
+      "name": "Massachusetts",
+      "lat_min": 41.15,
+      "lat_max": 42.9,
+      "lon_min": -73.55,
+      "lon_max": -69.85
+    },
+    "ne": {
+      "name": "New England",
+      "lat_min": 40.9,
+      "lat_max": 47.5,
+      "lon_min": -73.8,
+      "lon_max": -66.9
+    }
+  },
+  "default_region": "ma",
+  "default_center": [
+    42.2793,
+    -71.4162
+  ],
+  "default_zoom": 9,
+  "grid_resolution": 0.1,
+  "morel_taxon_name": "Morchella",
+  "morel_taxon_id": 56830,
+  "apis": {
+    "open_meteo_forecast": "https://api.open-meteo.com/v1/forecast",
+    "inaturalist_observations": "https://api.inaturalist.org/v1/observations",
+    "inaturalist_species_counts": "https://api.inaturalist.org/v1/observations/species_counts",
+    "massgis_openspace": "https://gis.eea.mass.gov/server/rest/services/Protected_and_Recreational_OpenSpace_Polygons/FeatureServer/0/query",
+    "nlcd_wms": "https://www.mrlc.gov/geoserver/mrlc_display/NLCD_2021_Land_Cover_L48/wms"
+  },
+  "soil_temp_thresholds": {
+    "too_cold": 7,
+    "warming": 10,
+    "sweet_spot_low": 10,
+    "optimal": 12,
+    "sweet_spot_high": 16,
+    "too_hot": 20,
+    "unit": "celsius"
+  },
+  "precip_thresholds": {
+    "dry": 15,
+    "good_low": 25,
+    "optimal": 35,
+    "good_high": 50,
+    "saturated": 75,
+    "window_days": 14,
+    "unit": "mm"
+  }
+}
