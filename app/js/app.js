@@ -261,12 +261,15 @@ async function fetchWeatherForCell(lat, lon) {
 // All grid cells for the region (loaded once)
 let allGridCells = [];
 
+// Current render resolution — starts coarse, gets finer
+let forceRenderRes = null;
+
 /**
  * Progressive refinement loading:
- * Pass 1: ~6 cells at 1.0° resolution  → instant (<1s)
- * Pass 2: ~25 cells at 0.5° resolution → fast (~2s)
- * Pass 3: ~100 cells at 0.2° resolution → fills in (~5s)
- * Pass 4: full 0.1° resolution nearby   → background
+ * Pass 1: ~6 points → rendered as big 1.0° blocks  → instant
+ * Pass 2: ~25 points → rendered as 0.5° blocks      → ~1s
+ * Pass 3: ~80 points → rendered as 0.2° blocks      → ~3s
+ * Pass 4: full 0.1° detail nearby                    → ~3s
  */
 async function fetchLocalWeather(lat, lon) {
   const delay = ms => new Promise(r => setTimeout(r, ms));
@@ -284,18 +287,16 @@ async function fetchLocalWeather(lat, lon) {
   updateReadinessGauge(userWeather);
   document.getElementById("legend").classList.remove("hidden");
 
-  // 2. Progressive passes — each one fills in more detail
+  // 2. Progressive passes — each renders at its own resolution
   const passes = [
-    { res: 1.0, radius: 3.0, batch: 10, label: null },          // ~6 cells, <1s
-    { res: 0.5, radius: 2.0, batch: 15, label: null },           // ~20 cells, ~1s
-    { res: 0.2, radius: 1.5, batch: 15, label: "Refining..." },  // ~80 cells, ~3s
-    { res: 0.1, radius: 0.8, batch: 15, label: "Details..." },   // local fine, ~3s
+    { res: 1.0, radius: 3.0, batch: 10 },
+    { res: 0.5, radius: 2.0, batch: 15 },
+    { res: 0.2, radius: 1.5, batch: 15 },
+    { res: 0.1, radius: 0.8, batch: 15 },
   ];
 
   for (const pass of passes) {
-    if (pass.label) showLoading(pass.label);
-
-    // Generate sample points at this resolution within radius
+    // Generate sample points at this resolution
     const cells = [];
     for (let clat = lat - pass.radius; clat <= lat + pass.radius; clat += pass.res) {
       for (let clon = lon - pass.radius; clon <= lon + pass.radius; clon += pass.res) {
@@ -308,6 +309,9 @@ async function fetchLocalWeather(lat, lon) {
       }
     }
 
+    // Set render resolution to this pass's block size
+    forceRenderRes = pass.res;
+
     // Fetch in batches
     for (let i = 0; i < cells.length; i += pass.batch) {
       const batch = cells.slice(i, i + pass.batch);
@@ -317,6 +321,9 @@ async function fetchLocalWeather(lat, lon) {
     }
   }
 
+  // Switch to zoom-based rendering for normal use
+  forceRenderRes = null;
+  renderProbabilityLayer();
   hideLoading();
 }
 
@@ -461,14 +468,19 @@ function renderProbabilityLayer() {
   const zoom = map.getZoom();
   const rectangles = [];
 
-  // At low zoom, merge cells into larger blocks (average scores)
-  // zoom >= 9: show individual 0.1° cells
-  // zoom 7-8: merge to 0.3° blocks
-  // zoom <= 6: merge to 0.5° blocks
+  // Determine render resolution:
+  // During progressive loading, forceRenderRes controls block size.
+  // After loading, zoom level controls it.
   let mergeRes;
-  if (zoom >= 9) mergeRes = 0.1;
-  else if (zoom >= 7) mergeRes = 0.3;
-  else mergeRes = 0.5;
+  if (forceRenderRes) {
+    mergeRes = forceRenderRes;
+  } else if (zoom >= 9) {
+    mergeRes = 0.1;
+  } else if (zoom >= 7) {
+    mergeRes = 0.3;
+  } else {
+    mergeRes = 0.5;
+  }
 
   if (mergeRes > 0.1) {
     // Aggregate cached cells into larger blocks
