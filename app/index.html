@@ -83,6 +83,45 @@
     <span id="harvest-teaser">The Honorable Harvest: Take only what you need</span>
   </div>
 
+  <!-- About / Credits button -->
+  <button id="btn-about" aria-label="About & Credits" title="About & Credits">i</button>
+
+  <!-- About / Credits panel -->
+  <div id="about-panel" class="hidden">
+    <div id="about-panel-inner">
+      <h2>Morel Conditions</h2>
+      <p style="color:var(--color-text-muted);font-style:italic;margin-bottom:16px;">
+        Helping people find morels responsibly.
+      </p>
+
+      <h3>Data Sources</h3>
+      <ul id="credits-list">
+        <li><b>Morel sightings & indicator species</b> — <a href="https://www.inaturalist.org" target="_blank" rel="noopener">iNaturalist</a>, a joint initiative of the California Academy of Sciences and the National Geographic Society. Observation data used under individual Creative Commons licenses.</li>
+        <li><b>Soil temperature & precipitation</b> — <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> weather API. Data: ERA5 (Copernicus/ECMWF). Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.</li>
+        <li><b>Ecoregion classification</b> — <a href="https://ecoregions2017.appspot.com/" target="_blank" rel="noopener">RESOLVE Ecoregions 2017</a>. CC BY 4.0.</li>
+        <li><b>Public land boundaries</b> — <a href="https://www.mass.gov/info-details/massgis-data-protected-and-recreational-openspace" target="_blank" rel="noopener">MassGIS</a>, Massachusetts Executive Office of Energy and Environmental Affairs.</li>
+        <li><b>Forest cover</b> — <a href="https://www.mrlc.gov/" target="_blank" rel="noopener">National Land Cover Database (NLCD)</a>, Multi-Resolution Land Characteristics Consortium.</li>
+        <li><b>Base map</b> — <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a> &amp; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.</li>
+      </ul>
+
+      <h3>Methodology</h3>
+      <p>The morel probability score is derived from analysis of 49,000+ iNaturalist observations correlated with historical weather data. Key validated findings:</p>
+      <ul id="credits-list">
+        <li>Soil temperature sweet spot: 50–61°F (10–16°C) at 6cm depth</li>
+        <li>Precipitation: ~1.5" of rain in the 14 days before fruiting</li>
+        <li>Indicator species co-occurrence validated against published mycological research</li>
+      </ul>
+
+      <h3>Honorable Harvest</h3>
+      <p>Guidelines inspired by <b>Robin Wall Kimmerer</b>'s <i>Braiding Sweetgrass</i> and Indigenous harvesting traditions. We encourage all foragers to harvest responsibly and with gratitude.</p>
+
+      <h3>Open Source</h3>
+      <p>This project is open source. <a href="https://github.com/mattbrown319/morels" target="_blank" rel="noopener">View on GitHub</a></p>
+
+      <button id="btn-close-about">Close</button>
+    </div>
+  </div>
+
   <!-- Honorable Harvest full panel -->
   <div id="harvest-panel" class="hidden">
     <div id="harvest-panel-inner">

@@ -875,6 +875,19 @@ function initUI() {
     map.locate({ setView: true, maxZoom: 12 });
   });
 
+  // About / Credits
+  document.getElementById("btn-about").addEventListener("click", () => {
+    document.getElementById("about-panel").classList.remove("hidden");
+  });
+  document.getElementById("btn-close-about").addEventListener("click", () => {
+    document.getElementById("about-panel").classList.add("hidden");
+  });
+  document.getElementById("about-panel").addEventListener("click", (e) => {
+    if (e.target === document.getElementById("about-panel")) {
+      document.getElementById("about-panel").classList.add("hidden");
+    }
+  });
+
   // Honorable Harvest
   const harvestBar = document.getElementById("harvest-bar");
   const harvestPanel = document.getElementById("harvest-panel");
