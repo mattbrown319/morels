@@ -15,6 +15,7 @@ let indicatorTaxa = [];
 
 // Layers
 let probabilityLayer = null;
+let recentMorelLayer = null;
 let sightingsLayer = null;
 let indicatorLayer = null;
 let publicLandLayer = null;
@@ -76,6 +77,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     // Load local area first (fast)
     await fetchLocalWeather(loc.lat, loc.lon);
+    loadRecentMorelLayer();
     loadSightingsLayer();
     loadIndicatorLayer();
 
@@ -321,9 +323,8 @@ async function fetchLocalWeather(lat, lon) {
     renderProbabilityLayer();
   }
 
-  // Done — clean up stacked layers and do one final clean render
+  // Done — switch to zoom-based rendering
   forceRenderRes = null;
-  clearProbabilityLayers();
   renderProbabilityLayer();
   hideLoading();
 }
@@ -462,28 +463,11 @@ function scoreToColor(score) {
 }
 
 // ── Probability Layer ──────────────────────────────────────────
-// During progressive loading, we ADD layers on top instead of replacing.
-// Each finer pass covers the coarser blocks underneath.
-let probabilityLayers = []; // stack of layers during progressive load
-
-function clearProbabilityLayers() {
-  probabilityLayers.forEach(l => map.removeLayer(l));
-  probabilityLayers = [];
-  if (probabilityLayer) map.removeLayer(probabilityLayer);
-  probabilityLayer = null;
-}
-
 function renderProbabilityLayer() {
   if (!document.getElementById("layer-probability").checked) {
-    clearProbabilityLayers();
+    if (probabilityLayer) map.removeLayer(probabilityLayer);
+    probabilityLayer = null;
     return;
-  }
-
-  // During progressive loading: add a new layer on top (don't remove old ones)
-  // After loading (forceRenderRes === null): replace everything with one clean layer
-  if (!forceRenderRes) {
-    // Final render or user interaction — clean slate
-    clearProbabilityLayers();
   }
 
   const zoom = map.getZoom();
@@ -589,18 +573,91 @@ function renderProbabilityLayer() {
     });
   }
 
+  // Add new layer, then remove old one (swap — no flicker, no stacking)
   const newLayer = L.layerGroup(rectangles).addTo(map);
-
-  if (forceRenderRes) {
-    // Progressive loading — stack layers, finer ones cover coarser
-    probabilityLayers.push(newLayer);
-  } else {
-    // Final render — this is the only layer
-    probabilityLayer = newLayer;
-  }
+  if (probabilityLayer) map.removeLayer(probabilityLayer);
+  probabilityLayer = newLayer;
 }
 
-// ── Sightings Layer ────────────────────────────────────────────
+// ── Recent Morel Sightings (live from iNaturalist) ─────────────
+async function loadRecentMorelLayer() {
+  if (recentMorelLayer) map.removeLayer(recentMorelLayer);
+  if (!document.getElementById("layer-recent-morels").checked) return;
+
+  showLoading("Checking for recent morel sightings...");
+  const center = map.getCenter();
+  const year = new Date().getFullYear();
+  const seasonStart = `${year}-01-01`;
+
+  try {
+    const url = `${appConfig.apis.inaturalist_observations}?taxon_id=${appConfig.morel_taxon_id}` +
+      `&lat=${center.lat.toFixed(2)}&lng=${center.lng.toFixed(2)}&radius=150` +
+      `&d1=${seasonStart}&per_page=200&order=desc&order_by=observed_on`;
+
+    const resp = await fetch(url);
+    const data = await resp.json();
+
+    const cluster = L.markerClusterGroup({
+      maxClusterRadius: 35,
+      showCoverageOnHover: false,
+      iconCreateFunction: (clust) => {
+        const count = clust.getChildCount();
+        return L.divIcon({
+          html: `<div class="cluster-icon" style="background:rgba(34,197,94,0.9);width:${Math.min(26 + count, 44)}px;height:${Math.min(26 + count, 44)}px">${count}</div>`,
+          iconSize: [30, 30],
+          className: "",
+        });
+      },
+    });
+
+    for (const obs of (data.results || [])) {
+      if (!obs.geojson) continue;
+      const [lon, lat] = obs.geojson.coordinates;
+      const taxon = obs.taxon || {};
+      const photos = obs.photos || [];
+
+      const icon = L.divIcon({
+        className: "",
+        html: `<div style="width:14px;height:14px;border-radius:50%;background:#22c55e;border:2px solid #fff;box-shadow:0 0 6px rgba(34,197,94,0.5)"></div>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      });
+
+      const marker = L.marker([lat, lon], { icon });
+
+      let popupHtml = `
+        <div>
+          <div class="popup-species" style="color:#22c55e">${taxon.name || "Morchella"}</div>
+          <div class="popup-date">${obs.observed_on || "Recently"} ${taxon.preferred_common_name ? '· ' + taxon.preferred_common_name : ''}</div>
+          <div style="font-size:11px;color:#22c55e;margin-top:4px;font-weight:600">This season!</div>
+      `;
+      if (photos.length > 0 && photos[0].url) {
+        const photoUrl = photos[0].url.replace("/square.", "/medium.");
+        popupHtml += `<img class="popup-photo" src="${photoUrl}" alt="Morel photo" loading="lazy">`;
+      }
+      if (obs.uri) {
+        popupHtml += `<a class="popup-link" href="${obs.uri}" target="_blank" rel="noopener">View on iNaturalist</a>`;
+      }
+      popupHtml += `</div>`;
+      marker.bindPopup(popupHtml, { maxWidth: 250 });
+
+      cluster.addLayer(marker);
+    }
+
+    recentMorelLayer = cluster;
+    map.addLayer(recentMorelLayer);
+
+    const count = data.results?.length || 0;
+    if (count > 0) {
+      console.log(`Found ${count} morel sightings this season!`);
+    }
+  } catch (err) {
+    console.warn("Failed to load recent morels:", err);
+  }
+  hideLoading();
+}
+
+// ── Sightings Layer (historical) ───────────────────────────────
 function loadSightingsLayer() {
   if (!sightingsData || !document.getElementById("layer-sightings").checked) return;
 
@@ -976,6 +1033,7 @@ function initUI() {
     // Clear existing layers
     weatherCache.clear();
     if (probabilityLayer) map.removeLayer(probabilityLayer);
+    if (recentMorelLayer) map.removeLayer(recentMorelLayer);
     if (sightingsLayer) map.removeLayer(sightingsLayer);
     if (indicatorLayer) map.removeLayer(indicatorLayer);
     if (publicLandLayer) map.removeLayer(publicLandLayer);
@@ -986,12 +1044,14 @@ function initUI() {
     map.setView(region.center, 7);
 
     await fetchLocalWeather(region.center[0], region.center[1]);
+    loadRecentMorelLayer();
     loadSightingsLayer();
     loadIndicatorLayer();
     fetchRegionWeather();
   });
 
   // Layer toggles
+  document.getElementById("layer-recent-morels").addEventListener("change", loadRecentMorelLayer);
   document.getElementById("layer-probability").addEventListener("change", renderProbabilityLayer);
   document.getElementById("layer-sightings").addEventListener("change", () => {
     if (document.getElementById("layer-sightings").checked) loadSightingsLayer();
