@@ -811,7 +811,7 @@ function updateReadinessGauge(weather) {
     emoji = "🟡";
     borderColor = "#91cf60";
     dateEstimate = "Almost there — could be any day";
-  } else if (tempC >= 5) {
+  } else if (tempC >= 3) {
     level = "Warming Up";
     emoji = "🟠";
     borderColor = "#fee08b";
