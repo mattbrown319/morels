@@ -44,6 +44,13 @@ const REGIONS = {
     grid: "data/grid-mi.json",
     sightings: "data/sightings-mi.geojson",
   },
+  mo: {
+    name: "Missouri / Central US",
+    bounds: { latMin: 35.9, latMax: 40.7, lonMin: -95.8, lonMax: -88.9 },
+    center: [38.5, -92.3],
+    grid: "data/grid-mo.json",
+    sightings: "data/sightings-mo.geojson",
+  },
 };
 
 let activeRegion = null;
@@ -75,20 +82,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("region-select").value = regionKey;
     await loadRegionData(regionKey);
 
-    // Load everything in parallel — don't let one failure block the rest
+    // Load everything in parallel
+    loadWeatherData(loc.lat, loc.lon);
     loadRecentMorelLayer();
     loadSightingsLayer();
     loadIndicatorLayer();
-
-    // Weather is nice-to-have, not a blocker
-    fetchLocalWeather(loc.lat, loc.lon).then(() => {
-      fetchRegionWeather();
-    }).catch(err => {
-      console.warn("Weather loading failed:", err);
-      hideLoading();
-      document.getElementById("readiness-detail").textContent =
-        "Weather data temporarily unavailable — try again shortly";
-    });
+    setupMapListeners();
   } catch (err) {
     console.error("Init error:", err);
     document.getElementById("readiness-label").textContent = "Error loading — pull to refresh";
@@ -273,151 +272,95 @@ async function fetchWeatherForCell(lat, lon) {
   return result;
 }
 
-// All grid cells for the region (loaded once)
-let allGridCells = [];
-
-// Current render resolution — starts coarse, gets finer
-let forceRenderRes = null;
+// Pre-computed weather data (loaded from weather-latest.json)
+let precomputedWeather = null;
 
 /**
- * Progressive refinement loading:
- * Pass 1: ~6 points → rendered as big 1.0° blocks  → instant
- * Pass 2: ~25 points → rendered as 0.5° blocks      → ~1s
- * Pass 3: ~80 points → rendered as 0.2° blocks      → ~3s
- * Pass 4: full 0.1° detail nearby                    → ~3s
+ * Load pre-computed weather data and populate the cache instantly.
+ * Falls back to live API if pre-computed data is unavailable.
  */
-async function fetchLocalWeather(lat, lon) {
-  const delay = ms => new Promise(r => setTimeout(r, ms));
+async function loadWeatherData(lat, lon) {
+  showLoading("Loading conditions...");
 
-  // Load the grid for the active region
-  const gridUrl = activeRegion ? activeRegion.grid : "data/grid-ne.json";
-  allGridCells = await fetch(gridUrl).then(r => r.json());
+  try {
+    // Try loading pre-computed weather first
+    const resp = await fetch("data/weather-latest.json");
+    if (resp.ok) {
+      precomputedWeather = await resp.json();
+      console.log(`Loaded pre-computed weather: ${precomputedWeather.cell_count} cells, updated ${precomputedWeather.updated_at}`);
 
-  // 1. Readiness gauge — single cell, instant
-  showLoading("Checking conditions...");
-  const userWeather = await fetchWeatherForCell(
-    Math.round(lat * 10) / 10,
-    Math.round(lon * 10) / 10
-  );
-  if (userWeather) {
-    updateReadinessGauge(userWeather);
-    document.getElementById("legend").classList.remove("hidden");
-  } else {
-    document.getElementById("readiness-label").innerHTML =
-      "🟠 Weather data loading slowly — showing sightings";
-    document.getElementById("readiness-detail").textContent =
-      "Soil temp data may be temporarily unavailable";
-  }
-
-  // 2. Progressive passes — each renders at its own resolution
-  const passes = [
-    { res: 1.0, radius: 3.0, batch: 10 },
-    { res: 0.5, radius: 2.0, batch: 15 },
-    { res: 0.2, radius: 1.5, batch: 15 },
-    { res: 0.1, radius: 0.8, batch: 15 },
-  ];
-
-  for (const pass of passes) {
-    // Generate sample points at this resolution
-    const cells = [];
-    for (let clat = lat - pass.radius; clat <= lat + pass.radius; clat += pass.res) {
-      for (let clon = lon - pass.radius; clon <= lon + pass.radius; clon += pass.res) {
-        const rlat = Math.round(clat * 10) / 10;
-        const rlon = Math.round(clon * 10) / 10;
-        const key = `${rlat},${rlon}`;
-        if (!weatherCache.has(key)) {
-          cells.push({ lat: rlat, lon: rlon });
-        }
+      // Populate the cache from pre-computed data
+      for (const [key, w] of Object.entries(precomputedWeather.cells)) {
+        weatherCache.set(key, {
+          soilTemp: w.st,
+          soilTempAvg: w.sa,
+          soilTempForecast: w.sf,
+          precip14d: w.p14,
+          precip7dForecast: w.p7f,
+          dailySoilAvg: (w.ds || []).map(d => ({ date: d.d, avg: d.t })),
+          fetchedAt: Date.now(),
+        });
       }
-    }
 
-    // Fetch all cells for this pass
-    for (let i = 0; i < cells.length; i += pass.batch) {
-      const batch = cells.slice(i, i + pass.batch);
-      await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
-      if (i + pass.batch < cells.length) await delay(100);
-    }
+      // Update readiness gauge for user's location
+      const userKey = `${Math.round(lat * 10) / 10},${Math.round(lon * 10) / 10}`;
+      const userWeather = weatherCache.get(userKey);
+      if (userWeather) {
+        updateReadinessGauge(userWeather);
+      } else {
+        // User is outside pre-computed area — try nearest cell
+        const nearest = findNearestWeatherCell(lat, lon);
+        if (nearest) updateReadinessGauge(nearest);
+      }
 
-    // Render this pass as one layer at its block size
-    forceRenderRes = pass.res;
-    renderProbabilityLayer();
+      document.getElementById("legend").classList.remove("hidden");
+      renderProbabilityLayer();
+      hideLoading();
+      return;
+    }
+  } catch (err) {
+    console.warn("Pre-computed weather unavailable:", err.message);
   }
 
-  // Done — switch to zoom-based rendering
-  forceRenderRes = null;
-  renderProbabilityLayer();
+  // Fallback: try live API for just the user's cell
+  try {
+    const userWeather = await fetchWeatherForCell(
+      Math.round(lat * 10) / 10,
+      Math.round(lon * 10) / 10
+    );
+    if (userWeather) {
+      updateReadinessGauge(userWeather);
+      document.getElementById("legend").classList.remove("hidden");
+      renderProbabilityLayer();
+    }
+  } catch (err) {
+    console.warn("Live weather also failed:", err.message);
+  }
+
+  document.getElementById("readiness-label").innerHTML =
+    "🟠 Weather data updating — showing sightings";
+  document.getElementById("readiness-detail").textContent =
+    "Conditions will appear when weather data is refreshed";
   hideLoading();
 }
 
-async function fetchRegionWeather() {
-  // Background: fill in remaining visible cells at full resolution
-  const batchSize = 20;
-  const delay = ms => new Promise(r => setTimeout(r, ms));
-
-  const visibleBounds = map.getBounds();
-  const visibleCells = allGridCells.filter(c => {
-    const key = `${c.lat},${c.lon}`;
-    if (weatherCache.has(key)) return false;
-    return (
-      c.lat >= visibleBounds.getSouth() - 0.3 &&
-      c.lat <= visibleBounds.getNorth() + 0.3 &&
-      c.lon >= visibleBounds.getWest() - 0.3 &&
-      c.lon <= visibleBounds.getEast() + 0.3
-    );
+function findNearestWeatherCell(lat, lon) {
+  let nearest = null;
+  let minDist = Infinity;
+  weatherCache.forEach((w, key) => {
+    const [clat, clon] = key.split(",").map(Number);
+    const dist = Math.abs(clat - lat) + Math.abs(clon - lon);
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = w;
+    }
   });
-
-  for (let i = 0; i < visibleCells.length; i += batchSize) {
-    const batch = visibleCells.slice(i, i + batchSize);
-    await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
-    if ((i / batchSize) % 2 === 0) renderProbabilityLayer();
-    await delay(300);
-  }
-  renderProbabilityLayer();
-
-  // React to pans and zooms
-  map.on("moveend", onMapMove);
-  map.on("zoomend", () => renderProbabilityLayer());
+  return nearest;
 }
 
-let moveTimeout = null;
-const MAX_CELLS_PER_LOAD = 80; // cap to prevent slowdown on zoom-out
-
-async function onMapMove() {
-  if (moveTimeout) clearTimeout(moveTimeout);
-  moveTimeout = setTimeout(async () => {
-    const bounds = map.getBounds();
-    const needCells = allGridCells.filter(c => {
-      const key = `${c.lat},${c.lon}`;
-      if (weatherCache.has(key)) return false;
-      return (
-        c.lat >= bounds.getSouth() - 0.1 &&
-        c.lat <= bounds.getNorth() + 0.1 &&
-        c.lon >= bounds.getWest() - 0.1 &&
-        c.lon <= bounds.getEast() + 0.1
-      );
-    });
-
-    if (needCells.length === 0) return;
-
-    // If zoomed way out, sample evenly instead of loading everything
-    let cellsToFetch = needCells;
-    if (needCells.length > MAX_CELLS_PER_LOAD) {
-      const step = Math.ceil(needCells.length / MAX_CELLS_PER_LOAD);
-      cellsToFetch = needCells.filter((_, i) => i % step === 0);
-    }
-
-    showLoading(`Loading ${cellsToFetch.length} areas...`);
-    const batchSize = 15;
-    const delay = ms => new Promise(r => setTimeout(r, ms));
-
-    for (let i = 0; i < cellsToFetch.length; i += batchSize) {
-      const batch = cellsToFetch.slice(i, i + batchSize);
-      await Promise.all(batch.map(c => fetchWeatherForCell(c.lat, c.lon)));
-      renderProbabilityLayer();
-      await delay(200);
-    }
-    hideLoading();
-  }, 600);
+// Re-render on zoom change
+function setupMapListeners() {
+  map.on("zoomend", () => renderProbabilityLayer());
 }
 
 // ── Probability Scoring ────────────────────────────────────────
@@ -1063,11 +1006,10 @@ function initUI() {
     const region = REGIONS[regionKey];
     map.setView(region.center, 7);
 
-    await fetchLocalWeather(region.center[0], region.center[1]);
+    loadWeatherData(region.center[0], region.center[1]);
     loadRecentMorelLayer();
     loadSightingsLayer();
     loadIndicatorLayer();
-    fetchRegionWeather();
   });
 
   // Layer toggles
