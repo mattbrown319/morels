@@ -733,39 +733,60 @@ async function loadIndicatorLayer() {
   hideLoading();
 }
 
-// ── Public Land Layer ──────────────────────────────────────────
+// ── Public Land Layer (PAD-US — national) ──────────────────────
+const PADUS_URL = "https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/Manager_Name_PADUS/FeatureServer/0/query";
+
+const ACCESS_LABELS = { OA: "Open Access", RA: "Restricted", XA: "Closed", UK: "Unknown" };
+const ACCESS_COLORS = { OA: "#4a7c59", RA: "#8a7c59", XA: "#7c5959", UK: "#666" };
+
 async function loadPublicLandLayer() {
   if (publicLandLayer) map.removeLayer(publicLandLayer);
   if (!document.getElementById("layer-public-land").checked) return;
 
   showLoading("Loading public lands...");
   const bounds = map.getBounds();
-  const envelope = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
+  const bbox = JSON.stringify({
+    xmin: bounds.getWest(), ymin: bounds.getSouth(),
+    xmax: bounds.getEast(), ymax: bounds.getNorth(),
+  });
 
   try {
-    const url = `${appConfig.apis.massgis_openspace}?` +
-      `where=1%3D1&outFields=SITE_NAME,FEE_OWNER,PUB_ACCESS&` +
-      `geometry=${encodeURIComponent(envelope)}&geometryType=esriGeometryEnvelope&` +
-      `inSR=4326&spatialRel=esriSpatialRelIntersects&outSR=4326&f=geojson&resultRecordCount=500`;
+    const params = new URLSearchParams({
+      where: "Pub_Access IN ('OA','RA')",
+      geometry: bbox,
+      geometryType: "esriGeometryEnvelope",
+      inSR: "4326",
+      spatialRel: "esriSpatialRelIntersects",
+      outFields: "Unit_Nm,Own_Name,Own_Type,Pub_Access,GIS_Acres",
+      returnGeometry: "true",
+      outSR: "4326",
+      f: "geojson",
+      resultRecordCount: "1000",
+    });
 
-    const resp = await fetch(url);
+    const resp = await fetch(`${PADUS_URL}?${params}`);
     const data = await resp.json();
 
     publicLandLayer = L.geoJSON(data, {
-      style: {
-        color: "#4a7c59",
-        fillColor: "#4a7c59",
-        fillOpacity: 0.15,
-        weight: 1,
+      style: (feature) => {
+        const access = feature.properties?.Pub_Access || "UK";
+        return {
+          color: ACCESS_COLORS[access] || "#666",
+          fillColor: ACCESS_COLORS[access] || "#666",
+          fillOpacity: access === "OA" ? 0.18 : 0.08,
+          weight: 1,
+        };
       },
       onEachFeature: (feature, layer) => {
         const p = feature.properties || {};
+        const access = ACCESS_LABELS[p.Pub_Access] || "Unknown";
+        const acres = p.GIS_Acres ? `${Math.round(p.GIS_Acres).toLocaleString()} acres` : "";
         layer.bindPopup(`
           <div>
-            <div class="popup-species">${p.SITE_NAME || "Conservation Land"}</div>
-            <div class="popup-date">${p.FEE_OWNER || ""}</div>
-            <div style="font-size:12px;margin-top:4px">
-              Access: ${p.PUB_ACCESS || "Unknown"}
+            <div class="popup-species">${p.Unit_Nm || "Public Land"}</div>
+            <div class="popup-date">${p.Own_Name || ""} ${acres ? "· " + acres : ""}</div>
+            <div style="font-size:12px;margin-top:4px;color:${ACCESS_COLORS[p.Pub_Access] || '#666'}">
+              ${access}
             </div>
           </div>
         `);
