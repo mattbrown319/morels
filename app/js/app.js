@@ -1043,6 +1043,9 @@ function initUI() {
   // Region switcher
   document.getElementById("region-select").addEventListener("change", async (e) => {
     const regionKey = e.target.value;
+    const region = REGIONS[regionKey];
+    if (!region) return;
+
     document.getElementById("layer-panel").classList.add("hidden");
 
     // Clear all existing layers
@@ -1055,10 +1058,17 @@ function initUI() {
     indicatorLayer = null;
     publicLandLayer = null;
 
-    // Load new region and all its layers
-    await loadRegionData(regionKey);
-    const region = REGIONS[regionKey];
+    // Move map first
     map.setView(region.center, 7);
+
+    // Load new region data
+    try {
+      await loadRegionData(regionKey);
+    } catch (err) {
+      console.warn("Region data failed:", err);
+    }
+
+    // Load all layers
     await loadAllLayers(region.center[0], region.center[1]);
   });
 
