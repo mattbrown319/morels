@@ -82,11 +82,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("region-select").value = regionKey;
     await loadRegionData(regionKey);
 
-    // Load everything in parallel
-    loadWeatherData(loc.lat, loc.lon);
-    loadRecentMorelLayer();
-    loadSightingsLayer();
-    loadIndicatorLayer();
+    // Load everything in parallel — each one handles its own errors
+    await loadAllLayers(loc.lat, loc.lon);
     setupMapListeners();
   } catch (err) {
     console.error("Init error:", err);
@@ -129,6 +126,29 @@ function addUserMarker(lat, lon) {
   L.marker([lat, lon], { icon: userIcon, zIndex: 9999 })
     .addTo(map)
     .bindPopup("Your area");
+}
+
+// ── Load All Layers ────────────────────────────────────────────
+async function loadAllLayers(lat, lon) {
+  // Ensure map center is updated before layers read it
+  map.setView([lat, lon], map.getZoom());
+  await new Promise(r => setTimeout(r, 100));
+
+  // Fire all layer loads in parallel, each with its own error handling
+  const results = await Promise.allSettled([
+    loadWeatherData(lat, lon),
+    loadRecentMorelLayer(),
+    loadSightingsLayer(),
+    loadIndicatorLayer(),
+  ]);
+
+  // Log any failures but don't crash
+  results.forEach((r, i) => {
+    if (r.status === "rejected") {
+      const names = ["Weather", "Recent Morels", "Sightings", "Indicators"];
+      console.warn(`${names[i]} failed:`, r.reason);
+    }
+  });
 }
 
 // ── Data Loading ───────────────────────────────────────────────
@@ -1014,23 +1034,21 @@ function initUI() {
     const regionKey = e.target.value;
     document.getElementById("layer-panel").classList.add("hidden");
 
-    // Clear existing layers
+    // Clear all existing layers
     weatherCache.clear();
-    if (probabilityLayer) map.removeLayer(probabilityLayer);
-    if (recentMorelLayer) map.removeLayer(recentMorelLayer);
-    if (sightingsLayer) map.removeLayer(sightingsLayer);
-    if (indicatorLayer) map.removeLayer(indicatorLayer);
-    if (publicLandLayer) map.removeLayer(publicLandLayer);
+    [probabilityLayer, recentMorelLayer, sightingsLayer, indicatorLayer, publicLandLayer]
+      .forEach(l => { if (l) map.removeLayer(l); });
+    probabilityLayer = null;
+    recentMorelLayer = null;
+    sightingsLayer = null;
+    indicatorLayer = null;
+    publicLandLayer = null;
 
-    // Load new region
+    // Load new region and all its layers
     await loadRegionData(regionKey);
     const region = REGIONS[regionKey];
     map.setView(region.center, 7);
-
-    loadWeatherData(region.center[0], region.center[1]);
-    loadRecentMorelLayer();
-    loadSightingsLayer();
-    loadIndicatorLayer();
+    await loadAllLayers(region.center[0], region.center[1]);
   });
 
   // Layer toggles
