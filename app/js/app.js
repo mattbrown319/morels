@@ -130,17 +130,24 @@ function addUserMarker(lat, lon) {
 
 // ── Load All Layers ────────────────────────────────────────────
 async function loadAllLayers(lat, lon) {
-  // Ensure map center is updated before layers read it
-  map.setView([lat, lon], map.getZoom());
-  await new Promise(r => setTimeout(r, 100));
+  // Wait for map to finish panning/zooming
+  await new Promise(resolve => {
+    map.once("moveend", resolve);
+    map.setView([lat, lon], map.getZoom(), { animate: false });
+    // Fallback in case moveend already fired
+    setTimeout(resolve, 200);
+  });
 
-  // Fire all layer loads in parallel, each with its own error handling
+  // Fire all layer loads in parallel, passing coordinates explicitly
   const results = await Promise.allSettled([
     loadWeatherData(lat, lon),
-    loadRecentMorelLayer(),
+    loadRecentMorelLayer(lat, lon),
     loadSightingsLayer(),
-    loadIndicatorLayer(),
+    loadIndicatorLayer(lat, lon),
   ]);
+
+  // Re-render probability layer now that map is definitely settled
+  renderProbabilityLayer();
 
   // Log any failures but don't crash
   results.forEach((r, i) => {
@@ -563,12 +570,12 @@ function renderProbabilityLayer() {
 }
 
 // ── Recent Morel Sightings (live from iNaturalist) ─────────────
-async function loadRecentMorelLayer() {
+async function loadRecentMorelLayer(lat, lon) {
   if (recentMorelLayer) map.removeLayer(recentMorelLayer);
   if (!document.getElementById("layer-recent-morels").checked) return;
 
   showLoading("Checking for recent morel sightings...");
-  const center = map.getCenter();
+  const center = (lat && lon) ? { lat, lng: lon } : map.getCenter();
   const year = new Date().getFullYear();
   const seasonStart = `${year}-01-01`;
 
@@ -700,12 +707,12 @@ function loadSightingsLayer() {
 }
 
 // ── Indicator Species Layer ────────────────────────────────────
-async function loadIndicatorLayer() {
+async function loadIndicatorLayer(lat, lon) {
   if (indicatorLayer) map.removeLayer(indicatorLayer);
   if (!document.getElementById("layer-indicators").checked) return;
 
   showLoading("Finding indicator species nearby...");
-  const center = map.getCenter();
+  const center = (lat && lon) ? { lat, lng: lon } : map.getCenter();
   const markers = [];
 
   for (const taxon of indicatorTaxa) {
