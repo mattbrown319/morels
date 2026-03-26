@@ -130,32 +130,27 @@ function addUserMarker(lat, lon) {
 
 // ── Load All Layers ────────────────────────────────────────────
 async function loadAllLayers(lat, lon) {
-  // Wait for map to finish panning/zooming
-  await new Promise(resolve => {
-    map.once("moveend", resolve);
-    map.setView([lat, lon], map.getZoom(), { animate: false });
-    // Fallback in case moveend already fired
-    setTimeout(resolve, 200);
-  });
+  // Small delay to let map settle after setView
+  await new Promise(r => setTimeout(r, 300));
 
-  // Fire all layer loads in parallel, passing coordinates explicitly
-  const results = await Promise.allSettled([
-    loadWeatherData(lat, lon),
-    loadRecentMorelLayer(lat, lon),
-    loadSightingsLayer(),
-    loadIndicatorLayer(lat, lon),
-  ]);
+  // Load each layer independently — failures are isolated
+  const loaders = [
+    ["Weather", loadWeatherData(lat, lon)],
+    ["Recent Morels", loadRecentMorelLayer(lat, lon)],
+    ["Sightings", loadSightingsLayer()],
+    ["Indicators", loadIndicatorLayer(lat, lon)],
+  ];
 
-  // Re-render probability layer now that map is definitely settled
-  renderProbabilityLayer();
-
-  // Log any failures but don't crash
-  results.forEach((r, i) => {
-    if (r.status === "rejected") {
-      const names = ["Weather", "Recent Morels", "Sightings", "Indicators"];
-      console.warn(`${names[i]} failed:`, r.reason);
+  for (const [name, promise] of loaders) {
+    try {
+      await promise;
+    } catch (err) {
+      console.warn(`${name} failed:`, err);
     }
-  });
+  }
+
+  // Final render to make sure everything is visible
+  renderProbabilityLayer();
 }
 
 // ── Data Loading ───────────────────────────────────────────────
