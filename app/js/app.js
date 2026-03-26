@@ -67,28 +67,37 @@ function detectRegion(lat, lon) {
 
 // ── Init ───────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", async () => {
+  // Step 1: Load base config (must succeed)
   try {
     await loadBaseData();
-    initMap();
-    initUI();
-
-    // Get user location, detect their region, load region data
-    const loc = await geolocateUser();
-    userLocation = loc;
-    map.setView([loc.lat, loc.lon], 10);
-    addUserMarker(loc.lat, loc.lon);
-
-    const regionKey = detectRegion(loc.lat, loc.lon);
-    document.getElementById("region-select").value = regionKey;
-    await loadRegionData(regionKey);
-
-    // Load everything in parallel — each one handles its own errors
-    await loadAllLayers(loc.lat, loc.lon);
-    setupMapListeners();
   } catch (err) {
-    console.error("Init error:", err);
-    document.getElementById("readiness-label").textContent = "Error loading — pull to refresh";
+    console.error("Failed to load base data:", err);
+    document.getElementById("readiness-label").textContent = "Failed to load app data";
+    return;
   }
+
+  // Step 2: Init map and UI (must succeed)
+  initMap();
+  initUI();
+
+  // Step 3: Get location (has its own fallback)
+  const loc = await geolocateUser();
+  userLocation = loc;
+  map.setView([loc.lat, loc.lon], 10);
+  addUserMarker(loc.lat, loc.lon);
+
+  // Step 4: Detect region and load its data
+  const regionKey = detectRegion(loc.lat, loc.lon);
+  document.getElementById("region-select").value = regionKey;
+  try {
+    await loadRegionData(regionKey);
+  } catch (err) {
+    console.warn("Region data load failed:", err);
+  }
+
+  // Step 5: Load all layers (each handles its own errors)
+  await loadAllLayers(loc.lat, loc.lon);
+  setupMapListeners();
 });
 
 // ── Geolocation ────────────────────────────────────────────────
