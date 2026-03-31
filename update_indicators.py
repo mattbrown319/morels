@@ -42,6 +42,8 @@ REGION_INDICATORS = {
              "why": "Earliest spring emergence. When it's up, soil is thawing.", "icon": "leaf"},
             {"id": 50310, "name": "Dicentra cucullaria", "common": "Dutchman's Breeches",
              "why": "Blooms just before peak morel time in rich woods.", "icon": "flower"},
+            {"id": 47599, "name": "Trillium", "common": "Trillium",
+             "why": "Traditional indicator — 'when trillium blooms, look for morels.'", "icon": "flower"},
             {"id": 940028, "name": "Cerioporus squamosus", "common": "Dryad's Saddle",
              "why": "Top co-occurring fungus. Found on same dead hardwoods.", "icon": "mushroom"},
         ],
