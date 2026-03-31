@@ -1,4 +1,4 @@
-name: Update Weather Data
+name: Update Weather & Indicator Data
 
 on:
   schedule:
@@ -10,7 +10,7 @@ permissions:
   contents: write
 
 jobs:
-  update-weather:
+  update-data:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -26,10 +26,13 @@ jobs:
       - name: Fetch weather data
         run: python update_weather.py
 
+      - name: Fetch indicator species data
+        run: python update_indicators.py
+
       - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add app/data/weather-latest.json
-          git diff --staged --quiet || git commit -m "Update weather data $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git add app/data/weather-latest.json app/data/indicators-latest.json
+          git diff --staged --quiet || git commit -m "Update weather & indicator data $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push

@@ -710,57 +710,97 @@ function loadSightingsLayer() {
   map.addLayer(sightingsLayer);
 }
 
-// ── Indicator Species Layer ────────────────────────────────────
+// ── Indicator Species Layer (pre-computed) ─────────────────────
+let indicatorsData = null;
+
+async function loadIndicatorsFile() {
+  if (indicatorsData) return indicatorsData;
+  try {
+    const resp = await fetch("data/indicators-latest.json");
+    if (resp.ok) {
+      indicatorsData = await resp.json();
+      console.log(`Loaded indicator species, updated ${indicatorsData.updated_at}`);
+    }
+  } catch (err) {
+    console.warn("Failed to load indicators file:", err);
+  }
+  return indicatorsData;
+}
+
+const INDICATOR_COLORS = {
+  leaf: "#4CAF50",
+  flower: "#E91E63",
+  mushroom: "#FF9800",
+};
+
+const INDICATOR_EMOJI = {
+  leaf: "🌿",
+  flower: "🌸",
+  mushroom: "🍄",
+};
+
 async function loadIndicatorLayer(lat, lon) {
   if (indicatorLayer) map.removeLayer(indicatorLayer);
   if (!document.getElementById("layer-indicators").checked) return;
 
-  showLoading("Finding indicator species nearby...");
-  const center = (lat && lon) ? { lat, lng: lon } : map.getCenter();
-  const markers = [];
+  showLoading("Loading indicator species...");
 
-  for (const taxon of indicatorTaxa) {
-    try {
-      const url = `${appConfig.apis.inaturalist_observations}?taxon_id=${taxon.taxon_id}` +
-        `&lat=${center.lat.toFixed(2)}&lng=${center.lng.toFixed(2)}&radius=50` +
-        `&d1=${thirtyDaysAgo()}&quality_grade=research,needs_id&per_page=20&order=desc&order_by=observed_on`;
+  const data = await loadIndicatorsFile();
+  if (!data) { hideLoading(); return; }
 
-      const resp = await fetch(url);
-      const data = await resp.json();
+  // Find the active region's indicators
+  const regionKey = document.getElementById("region-select").value;
+  const regionData = data.regions?.[regionKey];
+  if (!regionData) { hideLoading(); return; }
 
-      for (const obs of (data.results || [])) {
-        if (!obs.geojson) continue;
-        const [lon, lat] = obs.geojson.coordinates;
+  const cluster = L.markerClusterGroup({
+    maxClusterRadius: 30,
+    showCoverageOnHover: false,
+    iconCreateFunction: (clust) => {
+      const count = clust.getChildCount();
+      return L.divIcon({
+        html: `<div class="cluster-icon" style="background:rgba(76,175,80,0.85);width:${Math.min(24 + count, 40)}px;height:${Math.min(24 + count, 40)}px">${count}</div>`,
+        iconSize: [28, 28],
+        className: "",
+      });
+    },
+  });
 
-        const icon = L.divIcon({
-          className: "indicator-icon",
-          html: `<div class="indicator-icon" style="background:${taxon.color}" title="${taxon.common_name}">
-            ${taxon.icon === "leaf" ? "🌿" : "🌸"}
-          </div>`,
-          iconSize: [24, 24],
-          iconAnchor: [12, 12],
-        });
+  for (const taxon of regionData.taxa) {
+    const color = INDICATOR_COLORS[taxon.icon] || "#4CAF50";
+    const emoji = INDICATOR_EMOJI[taxon.icon] || "🌿";
 
-        const marker = L.marker([lat, lon], { icon });
-        marker.bindPopup(`
-          <div>
-            <div class="popup-species">${taxon.common_name}</div>
-            <div class="popup-date">${obs.observed_on || "Recently"} · <i>${taxon.name}</i></div>
-            <div style="font-size:12px;margin-top:4px;color:#666">${taxon.why}</div>
-          </div>
-        `, { maxWidth: 220 });
+    for (const s of (taxon.sightings || [])) {
+      const icon = L.divIcon({
+        className: "indicator-icon",
+        html: `<div class="indicator-icon" style="background:${color}" title="${taxon.common}">${emoji}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12],
+      });
 
-        markers.push(marker);
+      const marker = L.marker([s.lat, s.lon], { icon });
+
+      let popupHtml = `
+        <div>
+          <div class="popup-species">${taxon.common}</div>
+          <div class="popup-date">${s.date || "Recently"} · <i>${taxon.name}</i></div>
+          <div style="font-size:12px;margin-top:4px;color:#666">${taxon.why}</div>
+      `;
+      if (s.photo) {
+        popupHtml += `<img class="popup-photo" src="${s.photo}" alt="${taxon.common}" loading="lazy">`;
       }
+      if (s.uri) {
+        popupHtml += `<a class="popup-link" href="${s.uri}" target="_blank" rel="noopener">View on iNaturalist</a>`;
+      }
+      popupHtml += `</div>`;
+      marker.bindPopup(popupHtml, { maxWidth: 250 });
 
-      // Small delay between taxa to respect rate limits
-      await new Promise(r => setTimeout(r, 500));
-    } catch (err) {
-      console.warn(`Failed to load ${taxon.common_name}:`, err);
+      cluster.addLayer(marker);
     }
   }
 
-  indicatorLayer = L.layerGroup(markers).addTo(map);
+  indicatorLayer = cluster;
+  map.addLayer(indicatorLayer);
   hideLoading();
 }
 
