@@ -573,80 +573,83 @@ function renderProbabilityLayer() {
   probabilityLayer = newLayer;
 }
 
-// ── Recent Morel Sightings (live from iNaturalist) ─────────────
+// ── Recent Morel Sightings (pre-computed) ──────────────────────
+let morelsData = null;
+
+async function loadMorelsFile() {
+  if (morelsData) return morelsData;
+  try {
+    const resp = await fetch("data/morels-latest.json");
+    if (resp.ok) {
+      morelsData = await resp.json();
+      console.log(`Loaded recent morels, updated ${morelsData.updated_at}`);
+    }
+  } catch (err) {
+    console.warn("Failed to load morels file:", err);
+  }
+  return morelsData;
+}
+
 async function loadRecentMorelLayer(lat, lon) {
   if (recentMorelLayer) map.removeLayer(recentMorelLayer);
   if (!document.getElementById("layer-recent-morels").checked) return;
 
-  showLoading("Checking for recent morel sightings...");
-  const center = (lat && lon) ? { lat, lng: lon } : map.getCenter();
-  const year = new Date().getFullYear();
-  const seasonStart = `${year}-01-01`;
+  showLoading("Loading recent morel sightings...");
 
-  try {
-    const url = `${appConfig.apis.inaturalist_observations}?taxon_id=${appConfig.morel_taxon_id}` +
-      `&lat=${center.lat.toFixed(2)}&lng=${center.lng.toFixed(2)}&radius=150` +
-      `&d1=${seasonStart}&per_page=200&order=desc&order_by=observed_on`;
+  const data = await loadMorelsFile();
+  if (!data) { hideLoading(); return; }
 
-    const resp = await fetch(url);
-    const data = await resp.json();
+  const regionKey = document.getElementById("region-select").value;
+  const regionData = data.regions?.[regionKey];
+  if (!regionData) { hideLoading(); return; }
 
-    const cluster = L.markerClusterGroup({
-      maxClusterRadius: 35,
-      showCoverageOnHover: false,
-      iconCreateFunction: (clust) => {
-        const count = clust.getChildCount();
-        return L.divIcon({
-          html: `<div class="cluster-icon" style="background:rgba(34,197,94,0.9);width:${Math.min(26 + count, 44)}px;height:${Math.min(26 + count, 44)}px">${count}</div>`,
-          iconSize: [30, 30],
-          className: "",
-        });
-      },
+  const cluster = L.markerClusterGroup({
+    maxClusterRadius: 35,
+    showCoverageOnHover: false,
+    iconCreateFunction: (clust) => {
+      const count = clust.getChildCount();
+      return L.divIcon({
+        html: `<div class="cluster-icon" style="background:rgba(34,197,94,0.9);width:${Math.min(26 + count, 44)}px;height:${Math.min(26 + count, 44)}px">${count}</div>`,
+        iconSize: [30, 30],
+        className: "",
+      });
+    },
+  });
+
+  for (const s of (regionData.sightings || [])) {
+    const icon = L.divIcon({
+      className: "",
+      html: '<div style="width:14px;height:14px;border-radius:50%;background:#22c55e;border:2px solid #fff;box-shadow:0 0 6px rgba(34,197,94,0.5)"></div>',
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
     });
 
-    for (const obs of (data.results || [])) {
-      if (!obs.geojson) continue;
-      const [lon, lat] = obs.geojson.coordinates;
-      const taxon = obs.taxon || {};
-      const photos = obs.photos || [];
+    const marker = L.marker([s.lat, s.lon], { icon });
 
-      const icon = L.divIcon({
-        className: "",
-        html: `<div style="width:14px;height:14px;border-radius:50%;background:#22c55e;border:2px solid #fff;box-shadow:0 0 6px rgba(34,197,94,0.5)"></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7],
-      });
-
-      const marker = L.marker([lat, lon], { icon });
-
-      let popupHtml = `
-        <div>
-          <div class="popup-species" style="color:#22c55e">${taxon.name || "Morchella"}</div>
-          <div class="popup-date">${obs.observed_on || "Recently"} ${taxon.preferred_common_name ? '· ' + taxon.preferred_common_name : ''}</div>
-          <div style="font-size:11px;color:#22c55e;margin-top:4px;font-weight:600">This season!</div>
-      `;
-      if (photos.length > 0 && photos[0].url) {
-        const photoUrl = photos[0].url.replace("/square.", "/medium.");
-        popupHtml += `<img class="popup-photo" src="${photoUrl}" alt="Morel photo" loading="lazy">`;
-      }
-      if (obs.uri) {
-        popupHtml += `<a class="popup-link" href="${obs.uri}" target="_blank" rel="noopener">View on iNaturalist</a>`;
-      }
-      popupHtml += `</div>`;
-      marker.bindPopup(popupHtml, { maxWidth: 250 });
-
-      cluster.addLayer(marker);
+    let popupHtml = `
+      <div>
+        <div class="popup-species" style="color:#22c55e">${s.species || "Morchella"}</div>
+        <div class="popup-date">${s.date || "Recently"} ${s.common ? '· ' + s.common : ''}</div>
+        <div style="font-size:11px;color:#22c55e;margin-top:4px;font-weight:600">This season!</div>
+    `;
+    if (s.photo) {
+      popupHtml += `<img class="popup-photo" src="${s.photo}" alt="Morel photo" loading="lazy">`;
     }
-
-    recentMorelLayer = cluster;
-    map.addLayer(recentMorelLayer);
-
-    const count = data.results?.length || 0;
-    if (count > 0) {
-      console.log(`Found ${count} morel sightings this season!`);
+    if (s.uri) {
+      popupHtml += `<a class="popup-link" href="${s.uri}" target="_blank" rel="noopener">View on iNaturalist</a>`;
     }
-  } catch (err) {
-    console.warn("Failed to load recent morels:", err);
+    popupHtml += `</div>`;
+    marker.bindPopup(popupHtml, { maxWidth: 250 });
+
+    cluster.addLayer(marker);
+  }
+
+  recentMorelLayer = cluster;
+  map.addLayer(recentMorelLayer);
+
+  const count = regionData.sightings?.length || 0;
+  if (count > 0) {
+    console.log(`${count} morel sightings this season in ${regionData.name}`);
   }
   hideLoading();
 }
