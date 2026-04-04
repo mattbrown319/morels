@@ -6,7 +6,9 @@
   <title>Morel Density Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍄</text></svg>">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -117,70 +119,62 @@
     });
     L.marker(FRAMINGHAM, { icon: userIcon, zIndex: 9999 }).addTo(map).bindPopup("Framingham, MA");
 
-    // Load density data
+    // Color scale — fixed, doesn't change with zoom
+    function scoreToColor(score) {
+      if (score >= 0.8) return { fill: "#f0f921", border: "#fbb32f", opacity: 0.85 };
+      if (score >= 0.6) return { fill: "#fbb32f", border: "#eb7852", opacity: 0.75 };
+      if (score >= 0.4) return { fill: "#eb7852", border: "#cb4679", opacity: 0.65 };
+      if (score >= 0.2) return { fill: "#cb4679", border: "#9a179b", opacity: 0.55 };
+      if (score >= 0.05) return { fill: "#5b02a3", border: "#5b02a3", opacity: 0.45 };
+      return { fill: "#0d0887", border: "#0d0887", opacity: 0.35 };
+    }
+
     fetch("data/density-heatmap.json")
       .then(r => r.json())
       .then(data => {
-        // Heatmap layer
-        const heatPoints = data.points.map(p => [p.lat, p.lon, p.w]);
-        // Use absolute weights so colors stay consistent at all zoom levels.
-        // Multiply the normalized weight by a fixed intensity value instead
-        // of letting leaflet-heat auto-scale.
-        const maxWeight = Math.max(...data.points.map(p => p.w));
-        const absPoints = data.points.map(p => {
-          const stretched = Math.pow(p.w / maxWeight, 0.4);
-          return [p.lat, p.lon, stretched];
-        });
-
-        const heat = L.heatLayer(absPoints, {
-          radius: 22,
-          blur: 18,
-          maxZoom: 18,
-          max: 1.0,
-          minOpacity: 0.12,
-          gradient: {
-            0.0:  "transparent",
-            0.05: "#0d0887",
-            0.15: "#5b02a3",
-            0.25: "#9a179b",
-            0.35: "#cb4679",
-            0.45: "#eb7852",
-            0.55: "#fbb32f",
-            0.70: "#f0f921",
-            0.85: "#ffffff",
-            1.0:  "#ffffff",
-          },
-        }).addTo(map);
-
-        // Clickable info circles for cells with data
         const infoPanel = document.getElementById("info-panel");
         const infoPlace = document.getElementById("info-place");
         const infoDetails = document.getElementById("info-details");
 
-        for (const [key, cell] of Object.entries(data.cells)) {
-          const [lat, lon] = key.split(",").map(Number);
+        const maxWeight = Math.max(...data.points.map(p => p.w));
 
-          const circle = L.circleMarker([lat, lon], {
-            radius: Math.min(3 + cell.n / 3, 15),
-            color: "transparent",
-            fillColor: "transparent",
-            fillOpacity: 0,
+        // Fixed-color circles — stable at every zoom level
+        for (const p of data.points) {
+          const score = p.w / maxWeight;
+          const c = scoreToColor(score);
+          const size = 5 + score * 12;
+
+          const circle = L.circleMarker([p.lat, p.lon], {
+            radius: size,
+            fillColor: c.fill,
+            color: c.border,
+            weight: 1,
+            fillOpacity: c.opacity,
           }).addTo(map);
 
-          circle.on("click", () => {
-            infoPanel.style.display = "block";
-            infoPlace.textContent = cell.p || `${lat.toFixed(1)}°N, ${lon.toFixed(1)}°W`;
-            infoDetails.innerHTML = `
-              <b>${cell.n}</b> sightings across <b>${cell.y}</b> years<br>
-              Peak timing: <b>${cell.pk}</b>
-            `;
-          });
+          // Popup on tap
+          const cellKey = p.lat.toFixed(2) + "," + p.lon.toFixed(2);
+          const cell = data.cells[cellKey];
+          if (cell) {
+            circle.on("click", (e) => {
+              L.DomEvent.stopPropagation(e);
+              infoPanel.style.display = "block";
+              infoPlace.textContent = cell.p || `${p.lat.toFixed(2)}°N, ${p.lon.toFixed(2)}°W`;
+
+              const confidence = cell.pr > 5
+                ? '<br><span style="color:#888">Near urban area — normalized down</span>'
+                : cell.pr <= 1.5
+                  ? '<br><span style="color:#fbb32f">Rural area — high confidence</span>'
+                  : "";
+
+              infoDetails.innerHTML =
+                `<b>${cell.n}</b> sightings across <b>${cell.y}</b> years<br>` +
+                `Peak timing: <b>${cell.pk}</b>${confidence}`;
+            });
+          }
         }
 
-        // Tap map to dismiss info
-        map.on("click", () => {
-          infoPanel.style.display = "none";
-        });
+        map.on("click", () => { infoPanel.style.display = "none"; });
       });
   </script>
 </body>
