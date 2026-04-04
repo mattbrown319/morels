@@ -123,16 +123,21 @@
       .then(data => {
         // Heatmap layer
         const heatPoints = data.points.map(p => [p.lat, p.lon, p.w]);
-        // Stretch the contrast: take sqrt of weights so small differences
-        // in the low end become more visible, and use a tighter gradient
-        const stretchedPoints = data.points.map(p => [p.lat, p.lon, Math.pow(p.w, 0.4)]);
+        // Use absolute weights so colors stay consistent at all zoom levels.
+        // Multiply the normalized weight by a fixed intensity value instead
+        // of letting leaflet-heat auto-scale.
+        const maxWeight = Math.max(...data.points.map(p => p.w));
+        const absPoints = data.points.map(p => {
+          const stretched = Math.pow(p.w / maxWeight, 0.4);
+          return [p.lat, p.lon, stretched];
+        });
 
-        const heat = L.heatLayer(stretchedPoints, {
+        const heat = L.heatLayer(absPoints, {
           radius: 22,
           blur: 18,
-          maxZoom: 13,
-          max: 0.6,
-          minOpacity: 0.15,
+          maxZoom: 18,
+          max: 1.0,
+          minOpacity: 0.12,
           gradient: {
             0.0:  "transparent",
             0.05: "#0d0887",
