@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Morel Density Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍄</text></svg>">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #1a1a2e;
+      --surface: #16213e;
+      --text: #eee;
+      --muted: #aaa;
+      --accent: #e8a838;
+    }
+    html, body { height: 100%; font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
+    body { display: flex; flex-direction: column; }
+
+    #header {
+      padding: 12px 16px;
+      padding-top: calc(12px + env(safe-area-inset-top, 0px));
+      background: var(--surface);
+      border-bottom: 2px solid var(--accent);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    #header h1 { font-size: 16px; font-weight: 600; }
+    #header a { color: var(--accent); text-decoration: none; font-size: 13px; }
+
+    #map { flex: 1; }
+
+    #info-panel {
+      position: absolute;
+      bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+      left: 12px;
+      right: 12px;
+      z-index: 1000;
+      background: var(--surface);
+      border-radius: 12px;
+      padding: 14px 16px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      font-size: 13px;
+      display: none;
+    }
+    #info-panel h3 { font-size: 15px; color: var(--accent); margin-bottom: 6px; }
+    #info-panel .stat { color: var(--muted); margin-top: 4px; }
+    #info-panel .stat b { color: var(--text); }
+
+    #legend {
+      position: absolute;
+      top: calc(60px + env(safe-area-inset-top, 0px));
+      right: 12px;
+      z-index: 1000;
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 11px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    .legend-title { font-weight: 600; margin-bottom: 6px; font-size: 12px; }
+    .legend-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+    .swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+
+    .leaflet-popup-content-wrapper { border-radius: 12px; }
+    .leaflet-popup-content { margin: 12px; font-size: 13px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <div id="header">
+    <h1>Morel Sighting Density</h1>
+    <a href="index.html">← Back to conditions</a>
+  </div>
+
+  <div id="map"></div>
+
+  <div id="legend">
+    <div class="legend-title">Historical Density</div>
+    <div class="legend-row"><span class="swatch" style="background:#ff4500"></span> Very high</div>
+    <div class="legend-row"><span class="swatch" style="background:#ffa500"></span> High</div>
+    <div class="legend-row"><span class="swatch" style="background:#ffff00"></span> Moderate</div>
+    <div class="legend-row"><span class="swatch" style="background:#00ff00"></span> Some sightings</div>
+    <div class="legend-row"><span class="swatch" style="background:rgba(0,255,0,0.2)"></span> Sparse</div>
+  </div>
+
+  <div id="info-panel">
+    <h3 id="info-place">Tap a hotspot</h3>
+    <div class="stat" id="info-details"></div>
+  </div>
+
+  <script>
+    const FRAMINGHAM = [42.2793, -71.4162];
+
+    const map = L.map("map", {
+      center: FRAMINGHAM,
+      zoom: 8,
+      zoomControl: false,
+    });
+
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+      maxZoom: 18,
+    }).addTo(map);
+
+    L.control.zoom({ position: "topright" }).addTo(map);
+
+    // User marker
+    const userIcon = L.divIcon({
+      className: "",
+      html: '<div style="width:14px;height:14px;background:#4285f4;border:2.5px solid #fff;border-radius:50;box-shadow:0 0 8px rgba(66,133,244,0.6)"></div>',
+      iconSize: [14, 14], iconAnchor: [7, 7],
+    });
+    L.marker(FRAMINGHAM, { icon: userIcon, zIndex: 9999 }).addTo(map).bindPopup("Framingham, MA");
+
+    // Load density data
+    fetch("data/density-heatmap.json")
+      .then(r => r.json())
+      .then(data => {
+        // Heatmap layer
+        const heatPoints = data.points.map(p => [p.lat, p.lon, p.w]);
+        const heat = L.heatLayer(heatPoints, {
+          radius: 18,
+          blur: 20,
+          maxZoom: 12,
+          max: 1.0,
+          gradient: {
+            0.1: "#00ff00",
+            0.3: "#adff2f",
+            0.5: "#ffff00",
+            0.7: "#ffa500",
+            0.9: "#ff4500",
+            1.0: "#ff0000",
+          },
+        }).addTo(map);
+
+        // Clickable info circles for cells with data
+        const infoPanel = document.getElementById("info-panel");
+        const infoPlace = document.getElementById("info-place");
+        const infoDetails = document.getElementById("info-details");
+
+        for (const [key, cell] of Object.entries(data.cells)) {
+          const [lat, lon] = key.split(",").map(Number);
+
+          const circle = L.circleMarker([lat, lon], {
+            radius: Math.min(3 + cell.n / 3, 15),
+            color: "transparent",
+            fillColor: "transparent",
+            fillOpacity: 0,
+          }).addTo(map);
+
+          circle.on("click", () => {
+            infoPanel.style.display = "block";
+            infoPlace.textContent = cell.p || `${lat.toFixed(1)}°N, ${lon.toFixed(1)}°W`;
+            infoDetails.innerHTML = `
+              <b>${cell.n}</b> sightings across <b>${cell.y}</b> years<br>
+              Peak timing: <b>${cell.pk}</b>
+            `;
+          });
+        }
+
+        // Tap map to dismiss info
+        map.on("click", () => {
+          infoPanel.style.display = "none";
+        });
+      });
+  </script>
+</body>
+</html>
