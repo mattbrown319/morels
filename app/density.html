@@ -76,18 +76,27 @@
 <body>
   <div id="header">
     <h1>Morel Sighting Density</h1>
-    <a href="index.html">← Back to conditions</a>
+    <div>
+      <label style="font-size:13px;cursor:pointer">
+        <input type="checkbox" id="toggle-habitat"> Show unconfirmed habitat
+      </label>
+      &nbsp;
+      <a href="index.html">← Conditions</a>
+    </div>
   </div>
 
   <div id="map"></div>
 
   <div id="legend">
-    <div class="legend-title">Morel Density (pop. adjusted)</div>
-    <div class="legend-row"><span class="swatch" style="background:#d32f2f"></span> Hotspot</div>
-    <div class="legend-row"><span class="swatch" style="background:#e65100"></span> Very high</div>
-    <div class="legend-row"><span class="swatch" style="background:#f57c00"></span> High</div>
-    <div class="legend-row"><span class="swatch" style="background:#ffb74d"></span> Moderate</div>
-    <div class="legend-row"><span class="swatch" style="background:#ffe0b2"></span> Some</div>
+    <div class="legend-title">Morel Likelihood</div>
+    <div class="legend-row"><span class="swatch" style="background:#d32f2f"></span> Strong history</div>
+    <div class="legend-row"><span class="swatch" style="background:#f57c00"></span> Some finds</div>
+    <div class="legend-row"><span class="swatch" style="background:#ffb74d"></span> Occasional</div>
+    <div id="legend-habitat" style="display:none">
+      <div style="border-top:1px solid #ddd;margin:6px 0"></div>
+      <div class="legend-row"><span class="swatch" style="background:#4caf50;opacity:0.5"></span> Promising habitat</div>
+      <div class="legend-row"><span class="swatch" style="background:#8bc34a;opacity:0.3"></span> Possible habitat</div>
+    </div>
   </div>
 
   <div id="info-panel">
@@ -176,6 +185,50 @@
 
         map.on("click", () => { infoPanel.style.display = "none"; });
       });
+
+    // Habitat layer (unconfirmed promising areas)
+    let habitatLayer = null;
+
+    const HABITAT_STYLES = {
+      promising: { fill: "#4caf50", border: "#388e3c", opacity: 0.35, label: "Promising — deciduous forest, no morel reports yet" },
+      possible:  { fill: "#8bc34a", border: "#689f38", opacity: 0.2, label: "Possible — mixed forest" },
+    };
+
+    async function loadHabitat() {
+      if (habitatLayer) { map.removeLayer(habitatLayer); habitatLayer = null; }
+
+      const checked = document.getElementById("toggle-habitat").checked;
+      document.getElementById("legend-habitat").style.display = checked ? "block" : "none";
+      if (!checked) return;
+
+      try {
+        const resp = await fetch("data/habitat.json");
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        const markers = [];
+        for (const h of data) {
+          if (h.cat === "confirmed") continue; // already shown by density circles
+          const style = HABITAT_STYLES[h.cat];
+          if (!style) continue;
+
+          const rect = L.rectangle(
+            [[h.lat - 0.025, h.lon - 0.025], [h.lat + 0.025, h.lon + 0.025]],
+            { color: style.border, fillColor: style.fill, fillOpacity: style.opacity, weight: 0.5 }
+          );
+          rect.bindPopup(`<div style="font-size:13px"><b>${style.label}</b><br>
+            <span style="color:#666">NLCD class: ${h.nlcd === 41 ? "Deciduous Forest" : h.nlcd === 43 ? "Mixed Forest" : "Evergreen Forest"}</span><br>
+            <span style="color:#4caf50">No morel sightings reported here — could be undiscovered!</span></div>`);
+          markers.push(rect);
+        }
+
+        habitatLayer = L.layerGroup(markers).addTo(map);
+      } catch (err) {
+        console.warn("Habitat layer failed:", err);
+      }
+    }
+
+    document.getElementById("toggle-habitat").addEventListener("change", loadHabitat);
 
     // Load sightings as clustered markers
     fetch("data/sightings-ne.geojson")
